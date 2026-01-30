@@ -37,6 +37,9 @@ export default function App() {
   const [bpmlChartData, setBpmlChartData] = useState([]); // Pie chart data for L1 vs L4
   const [ocmChartData, setOcmChartData] = useState([]); // Bar chart data for L1 vs OCM Valid
   const [changeCategoryChartData, setChangeCategoryChartData] = useState([]); // Bar chart data for Change Category
+  const [ocmL5ChartData, setOcmL5ChartData] = useState([]); // Bar chart data for L1 vs unique L5 count (filtered by OCM Valid: SCH_R, SCH_N, TRN_N, TRN_C, FRC)
+  const [bpmlAnalysisData, setBpmlAnalysisData] = useState(null); // Full data from Recommended BPML sheet for analysis page
+  const [showBpmlAnalysis, setShowBpmlAnalysis] = useState(false); // Show BPML Analysis full page
 
   const hasFile = useMemo(() => cards.some((c) => c.file), [cards]);
   const uploadedCount = useMemo(() => cards.filter((c) => c.file).length, [cards]);
@@ -109,14 +112,26 @@ export default function App() {
       const sheetName = workbook.SheetNames.find(name => name.trim() === 'Recommended BPML');
       if (!sheetName) {
         console.log('Recommended BPML sheet not found for chart');
+        setBpmlAnalysisData(null);
         return;
       }
 
       const sheet = workbook.Sheets[sheetName];
       const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
-      if (rows.length < 2) return;
+      if (rows.length < 2) {
+        setBpmlAnalysisData(null);
+        return;
+      }
 
       const headers = rows[0];
+
+      // Store full data for BPML Analysis page
+      setBpmlAnalysisData({
+        header: headers,
+        rows: rows.slice(1),
+        filename: file.name,
+        size: file.size,
+      });
 
       // Find column indices
       const l1Idx = headers.findIndex(h => h && h.toString().toLowerCase().includes('level 1'));
@@ -150,87 +165,87 @@ export default function App() {
         console.log('Pie chart data:', chartData);
       }
 
+      // Shared abbreviation logic for Chart 2 and Chart 4
+      const businessAbbreviations = {
+        'procure to pay': 'P2P',
+        'purchase to pay': 'P2P',
+        'procurement': 'P2P',
+        'order to cash': 'OTC',
+        'record to report': 'RTR',
+        'hire to retire': 'H2R',
+        'plan to produce': 'P2P',
+        'plan to product': 'P2P',
+        'source to pay': 'S2P',
+        'acquire to retire': 'A2R',
+        'finance': 'FIN',
+        'finance & controlling': 'FICO',
+        'financial accounting': 'FI',
+        'controlling': 'CO',
+        'sales': 'SD',
+        'sales & distribution': 'SD',
+        'materials management': 'MM',
+        'production planning': 'PP',
+        'plant maintenance': 'PM',
+        'quality management': 'QM',
+        'human resources': 'HR',
+        'human capital': 'HCM',
+        'supply chain': 'SCM',
+        'supply chain management': 'SCM',
+        'warehouse management': 'WM',
+        'extended warehouse': 'EWM',
+        'transportation': 'TM',
+        'project system': 'PS',
+        'asset management': 'EAM',
+        'enterprise asset': 'EAM',
+        'customer service': 'CS',
+        'global trade': 'GTS',
+        'treasury': 'TRM',
+        'real estate': 'RE',
+        'environment health safety': 'EHS',
+      };
+
+      const getAbbreviation = (name, index) => {
+        const lower = name.toLowerCase();
+        for (const [key, abbr] of Object.entries(businessAbbreviations)) {
+          if (lower.includes(key)) {
+            return abbr;
+          }
+        }
+        // Fallback: take first letter of each word
+        const words = name.split(/[\s&,\-()]+/).filter(w => w.length > 1);
+        if (words.length >= 2) {
+          return words.slice(0, 3).map(w => w[0]).join('').toUpperCase();
+        }
+        return name.substring(0, 3).toUpperCase();
+      };
+
       // Chart 2: Level 1 vs OCM Valid (not 'Same' or 'Existing')
-     if (l1Idx !== -1 && ocmIdx !== -1) {
-  const l1OcmMap = new Map();
+      if (l1Idx !== -1 && ocmIdx !== -1) {
+        const l1OcmMap = new Map();
 
-  rows.slice(1).forEach((row) => {
-    const l1 = cleanL1Name((row[l1Idx] || '').toString().trim());
+        rows.slice(1).forEach((row) => {
+          const l1 = cleanL1Name((row[l1Idx] || '').toString().trim());
 
-    // normalize OCM Valid safely
-    const rawOcm = row[ocmIdx];
-    const ocmValid = (rawOcm ?? '').toString().trim().toLowerCase();
+          // normalize OCM Valid safely
+          const rawOcm = row[ocmIdx];
+          const ocmValid = (rawOcm ?? '').toString().trim().toLowerCase();
 
-    //  skip blanks / nulls / placeholders
-    const isBlank =
-      !ocmValid ||
-      ocmValid === '-' ||
-      ocmValid === 'na' ||
-      ocmValid === 'n/a' ||
-      ocmValid === 'null' ||
-      ocmValid === 'undefined';
+          //  skip blanks / nulls / placeholders
+          const isBlank =
+            !ocmValid ||
+            ocmValid === '-' ||
+            ocmValid === 'na' ||
+            ocmValid === 'n/a' ||
+            ocmValid === 'null' ||
+            ocmValid === 'undefined';
 
-    //  skip "same" and "existing"
-    const isExcluded = ocmValid === 'same' || ocmValid === 'existing';
+          //  skip "same" and "existing"
+          const isExcluded = ocmValid === 'same' || ocmValid === 'existing';
 
-    if (!l1 || isBlank || isExcluded) return;
+          if (!l1 || isBlank || isExcluded) return;
 
-    l1OcmMap.set(l1, (l1OcmMap.get(l1) || 0) + 1);
-  });
-
-        // Standard business process abbreviations
-        const businessAbbreviations = {
-          'procure to pay': 'P2P',
-          'purchase to pay': 'P2P',
-          'procurement': 'P2P',
-          'order to cash': 'OTC',
-          'record to report': 'RTR',
-          'hire to retire': 'H2R',
-          'plan to produce': 'P2P',
-          'plan to product': 'P2P',
-          'source to pay': 'S2P',
-          'acquire to retire': 'A2R',
-          'finance': 'FIN',
-          'finance & controlling': 'FICO',
-          'financial accounting': 'FI',
-          'controlling': 'CO',
-          'sales': 'SD',
-          'sales & distribution': 'SD',
-          'materials management': 'MM',
-          'production planning': 'PP',
-          'plant maintenance': 'PM',
-          'quality management': 'QM',
-          'human resources': 'HR',
-          'human capital': 'HCM',
-          'supply chain': 'SCM',
-          'supply chain management': 'SCM',
-          'warehouse management': 'WM',
-          'extended warehouse': 'EWM',
-          'transportation': 'TM',
-          'project system': 'PS',
-          'asset management': 'EAM',
-          'enterprise asset': 'EAM',
-          'customer service': 'CS',
-          'global trade': 'GTS',
-          'treasury': 'TRM',
-          'real estate': 'RE',
-          'environment health safety': 'EHS',
-        };
-
-        const getAbbreviation = (name, index) => {
-          const lower = name.toLowerCase();
-          for (const [key, abbr] of Object.entries(businessAbbreviations)) {
-            if (lower.includes(key)) {
-              return abbr;
-            }
-          }
-          // Fallback: take first letter of each word
-          const words = name.split(/[\s&,\-()]+/).filter(w => w.length > 1);
-          if (words.length >= 2) {
-            return words.slice(0, 3).map(w => w[0]).join('').toUpperCase();
-          }
-          return name.substring(0, 3).toUpperCase();
-        };
+          l1OcmMap.set(l1, (l1OcmMap.get(l1) || 0) + 1);
+        });
 
         // Track used abbreviations to avoid duplicates
         const usedAbbrs = new Map();
@@ -287,6 +302,101 @@ export default function App() {
         setChangeCategoryChartData(changeCategoryData);
         console.log('Bar chart data (Change Category):', changeCategoryData);
       }
+
+      // Chart 4: Level 1 vs unique Level 5 count (filtered by OCM Valid = 'Change' AND specific Change Category values)
+      const l5Idx = headers.findIndex(h => h && h.toString().toLowerCase().includes('level 5'));
+      console.log('Chart 4 - Column indices:', { l1Idx, l5Idx, ocmIdx, changeCategoryIdx });
+      console.log('Chart 4 - Level 5 column name:', l5Idx !== -1 ? headers[l5Idx] : 'NOT FOUND');
+      console.log('Chart 4 - OCM Valid column name:', ocmIdx !== -1 ? headers[ocmIdx] : 'NOT FOUND');
+      console.log('Chart 4 - Change Category column name:', changeCategoryIdx !== -1 ? headers[changeCategoryIdx] : 'NOT FOUND');
+
+      // Sample OCM Valid and Change Category values for debugging
+      if (ocmIdx !== -1 && changeCategoryIdx !== -1) {
+        const sampleOcmValues = new Set();
+        const sampleCategoryValues = new Set();
+        rows.slice(1, 11).forEach(row => {
+          const ocmVal = (row[ocmIdx] ?? '').toString().trim();
+          const catVal = (row[changeCategoryIdx] ?? '').toString().trim();
+          if (ocmVal) sampleOcmValues.add(ocmVal);
+          if (catVal) sampleCategoryValues.add(catVal);
+        });
+        console.log('Chart 4 - Sample OCM Valid values (first 10 rows):', Array.from(sampleOcmValues));
+        console.log('Chart 4 - Sample Change Category values (first 10 rows):', Array.from(sampleCategoryValues));
+      }
+
+      if (l1Idx !== -1 && l5Idx !== -1 && ocmIdx !== -1 && changeCategoryIdx !== -1) {
+        // Specific Change Category values to include
+        const validChangeCategories = ['SCH_R', 'SCH_N', 'TRN_N', 'TRN_C', 'FRC'];
+        const l1ToL5Map = new Map();
+        let matchedRows = 0;
+        let ocmChangeCount = 0;
+        let validCategoryCount = 0;
+        let bothConditionsCount = 0;
+
+        rows.slice(1).forEach(row => {
+          const l1 = cleanL1Name((row[l1Idx] || '').toString().trim());
+          const l5 = (row[l5Idx] || '').toString().trim();
+
+          // Check OCM Valid = 'Change'
+          const rawOcm = row[ocmIdx];
+          const ocmValid = (rawOcm ?? '').toString().trim().toLowerCase();
+
+          // Check Change Category
+          const rawCategory = row[changeCategoryIdx];
+          const changeCategory = (rawCategory ?? '').toString().trim().toUpperCase();
+
+          // Count rows matching each condition
+          if (ocmValid === 'change') ocmChangeCount++;
+          if (validChangeCategories.includes(changeCategory)) validCategoryCount++;
+          if (ocmValid === 'change' && validChangeCategories.includes(changeCategory)) bothConditionsCount++;
+
+          // Only include rows where OCM Valid = 'Change' AND Change Category matches one of the specified values
+          if (l1 && l5 && ocmValid === 'change' && validChangeCategories.includes(changeCategory)) {
+            matchedRows++;
+            if (!l1ToL5Map.has(l1)) {
+              l1ToL5Map.set(l1, new Set());
+            }
+            l1ToL5Map.get(l1).add(l5);
+          }
+        });
+
+        console.log('Chart 4 - Rows where OCM Valid = "change":', ocmChangeCount);
+        console.log('Chart 4 - Rows with valid Change Category:', validCategoryCount);
+        console.log('Chart 4 - Rows matching BOTH conditions:', bothConditionsCount);
+        console.log('Chart 4 - Matched rows with L1 and L5:', matchedRows);
+        console.log('Chart 4 - L1 to L5 map size:', l1ToL5Map.size);
+
+        // Generate chart data with abbreviations (same logic as Chart 2)
+        const usedAbbrs = new Map();
+        const ocmL5Data = Array.from(l1ToL5Map.entries())
+          .filter(([l1, l5Set]) => l1 && l5Set.size > 0)
+          .map(([l1, l5Set], index) => {
+            let abbr = getAbbreviation(l1, index);
+            // Handle duplicate abbreviations
+            if (usedAbbrs.has(abbr)) {
+              const num = usedAbbrs.get(abbr) + 1;
+              usedAbbrs.set(abbr, num);
+              abbr = `${abbr}${num}`;
+            } else {
+              usedAbbrs.set(abbr, 1);
+            }
+            return {
+              fullName: l1,
+              shortCode: abbr,
+              count: l5Set.size,
+            };
+          });
+        setOcmL5ChartData(ocmL5Data);
+        console.log('Bar chart data (L1 vs unique L5 where OCM Valid = Change):', ocmL5Data);
+      } else {
+        console.warn('Chart 4 - Cannot generate: Missing required columns', {
+          hasL1: l1Idx !== -1,
+          hasL5: l5Idx !== -1,
+          hasOcmValid: ocmIdx !== -1,
+          hasChangeCategory: changeCategoryIdx !== -1
+        });
+        setOcmL5ChartData([]);
+      }
     } catch (err) {
       console.error('Error parsing BPML for charts:', err);
     }
@@ -340,6 +450,9 @@ export default function App() {
       setBpmlChartData([]);
       setOcmChartData([]);
       setChangeCategoryChartData([]);
+      setOcmL5ChartData([]);
+      setBpmlAnalysisData(null);
+      setShowBpmlAnalysis(false);
     }
   };
 
@@ -870,6 +983,23 @@ export default function App() {
         )}
 
         <div style={styles.summaryRow}>
+          {/* BPML Analysis Tile - Only enabled when L1-L5 BPML file is uploaded */}
+          <SummaryCard
+            key="bpml-analysis"
+            title="BPML Analysis"
+            output={bpmlAnalysisData ? {
+              filename: bpmlAnalysisData.filename,
+              size: bpmlAnalysisData.size,
+              progress: 100,
+              done: true,
+              sheets: [{ name: 'Recommended BPML', rows: bpmlAnalysisData.rows.length }],
+            } : null}
+            onPreview={() => {
+              if (bpmlAnalysisData) {
+                setShowBpmlAnalysis(true);
+              }
+            }}
+          />
           {[0, 1].map((idx) => {
             const card = cards[idx];
             const output = outputs.find((o) => o.cardIdx === idx);
@@ -934,118 +1064,16 @@ export default function App() {
         />
       )}
 
-      {/* BPML Visualizations */}
-      {(bpmlChartData.length > 0 || ocmChartData.length > 0 || changeCategoryChartData.length > 0) && (
-        <section style={styles.card}>
-          <div style={styles.sectionHeader}>
-            <h3 style={styles.sectionTitle}>BPML Analytics</h3>
-          </div>
-          <div style={styles.chartContainer}>
-            {bpmlChartData.length > 0 && (
-              <div style={styles.chartCard}>
-                <h4 style={styles.chartTitle}>Unique Sub-Processes by Business Area</h4>
-                <p style={styles.chartSubtitle}>Level 1 vs Unique Level 4 Count</p>
-                <ResponsiveContainer width="100%" height={400}>
-                  <PieChart>
-                    <Pie
-                      data={bpmlChartData}
-                      cx="50%"
-                      cy="50%"
-                      labelLine={true}
-                      label={({ name, value, percent }) => `${name}: ${value} (${(percent * 100).toFixed(0)}%)`}
-                      outerRadius={120}
-                      fill="#8884d8"
-                      dataKey="value"
-                    >
-                      {bpmlChartData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip formatter={(value) => [`${value} unique sub-processes`, 'Count']} />
-                    <Legend />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-            )}
-            {ocmChartData.length > 0 && (
-              <div style={styles.chartCard}>
-                <h4 style={styles.chartTitle}>OCM Changes by Business Area</h4>
-                <p style={styles.chartSubtitle}>Level 1 where OCM Valid is not Same or Existing (hover for details)</p>
-                <ResponsiveContainer width="100%" height={450}>
-                  <BarChart data={ocmChartData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }} barCategoryGap="15%">
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis
-                      dataKey="shortCode"
-                      interval={0}
-                      tick={{ fontSize: 11, fontWeight: 600 }}
-                      height={60}
-                      tickMargin={10}
-                    />
-                    <YAxis />
-                    <Tooltip
-                      content={({ active, payload }) => {
-                        if (active && payload && payload.length) {
-                          const data = payload[0].payload;
-                          return (
-                            <div style={styles.customTooltip}>
-                              <div style={styles.tooltipTitle}>{data.fullName}</div>
-                              <div style={styles.tooltipValue}>{data.count} items</div>
-                            </div>
-                          );
-                        }
-                        return null;
-                      }}
-                    />
-                    <Bar dataKey="count" fill="#FD5108" radius={[4, 4, 0, 0]}>
-                      {ocmChartData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            )}
-            {changeCategoryChartData.length > 0 && (
-              <div style={styles.chartCard}>
-                <h4 style={styles.chartTitle}>Change Category Distribution</h4>
-                <p style={styles.chartSubtitle}>Count of items by Change Category</p>
-                <ResponsiveContainer width="100%" height={400}>
-                  <BarChart data={changeCategoryChartData} margin={{ top: 20, right: 30, left: 20, bottom:60 }}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis
-                      dataKey="name"
-                      angle={-35}
-                      textAnchor="end"
-                      interval={0}
-                      height={120}
-                      tick={{ fontSize: 11 }}
-                    />
-<YAxis
-  domain={[
-    0,
-    Math.ceil(Math.max(...changeCategoryChartData.map(d => d.count)) / 10) * 10
-  ]}
-  ticks={Array.from(
-    {
-      length:
-        Math.ceil(Math.max(...changeCategoryChartData.map(d => d.count)) / 10) + 1
-    },
-    (_, i) => i * 10
-  )}
-  allowDecimals={false}
-/>
-                    <Tooltip formatter={(value) => [`${value} items`, 'Count']} />
-                    <Bar dataKey="count" fill="#FD5108" radius={[4, 4, 0, 0]}>
-                      {changeCategoryChartData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            )}
-          </div>
-        </section>
+      {/* BPML Analysis Full Page */}
+      {showBpmlAnalysis && bpmlAnalysisData && (
+        <BpmlAnalysisPage
+          data={bpmlAnalysisData}
+          onClose={() => setShowBpmlAnalysis(false)}
+          bpmlChartData={bpmlChartData}
+          ocmChartData={ocmChartData}
+          changeCategoryChartData={changeCategoryChartData}
+          ocmL5ChartData={ocmL5ChartData}
+        />
       )}
     </div>
   );
@@ -1265,6 +1293,569 @@ function PreviewPage({
           >
             Next
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SearchableDropdown({ value, options, onChange, placeholder = 'Select...' }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [hoveredIdx, setHoveredIdx] = useState(null);
+  const wrapperRef = useRef(null);
+  const inputRef = useRef(null);
+
+  // Filter options based on search term
+  const filteredOptions = useMemo(() => {
+    if (!searchTerm) return options;
+    return options.filter(opt =>
+      opt.toString().toLowerCase().includes(searchTerm.toLowerCase())
+    );
+  }, [options, searchTerm]);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(event.target)) {
+        setIsOpen(false);
+        setSearchTerm('');
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const handleInputChange = (e) => {
+    const val = e.target.value;
+    setSearchTerm(val);
+    onChange(val);
+    if (!isOpen) setIsOpen(true);
+  };
+
+  const handleSelect = (opt) => {
+    onChange(opt);
+    setSearchTerm('');
+    setIsOpen(false);
+  };
+
+  const handleClear = (e) => {
+    e.stopPropagation();
+    onChange('');
+    setSearchTerm('');
+    setIsOpen(false);
+  };
+
+  const handleInputFocus = () => {
+    setIsOpen(true);
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Escape') {
+      setIsOpen(false);
+      setSearchTerm('');
+    } else if (e.key === 'Enter' && filteredOptions.length > 0) {
+      handleSelect(filteredOptions[0]);
+    }
+  };
+
+  return (
+    <div ref={wrapperRef} style={styles.searchableDropdown}>
+      <div
+        style={{
+          ...styles.dropdownInputWrapper,
+          ...(isOpen ? styles.dropdownInputWrapperFocused : {}),
+        }}
+        onClick={() => inputRef.current?.focus()}
+      >
+        <input
+          ref={inputRef}
+          type="text"
+          style={styles.dropdownInput}
+          value={value}
+          onChange={handleInputChange}
+          onFocus={handleInputFocus}
+          onKeyDown={handleKeyDown}
+          placeholder={placeholder}
+        />
+        {value && (
+          <button style={styles.dropdownClearBtn} onClick={handleClear} aria-label="Clear">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        )}
+        <button
+          style={styles.dropdownToggleBtn}
+          onClick={(e) => { e.stopPropagation(); setIsOpen(!isOpen); }}
+          aria-label="Toggle dropdown"
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            style={{ transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}
+          >
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </button>
+      </div>
+      {isOpen && (
+        <div style={styles.dropdownMenu}>
+          <div
+            style={{
+              ...styles.dropdownOption,
+              ...(value === '' ? styles.dropdownOptionSelected : {}),
+              ...(hoveredIdx === -1 ? styles.dropdownOptionHovered : {}),
+            }}
+            onClick={() => handleSelect('')}
+            onMouseEnter={() => setHoveredIdx(-1)}
+            onMouseLeave={() => setHoveredIdx(null)}
+          >
+            <span style={styles.dropdownOptionAll}>All</span>
+          </div>
+          {filteredOptions.length > 0 ? (
+            <div style={styles.dropdownOptionsList}>
+              {filteredOptions.slice(0, 100).map((opt, idx) => (
+                <div
+                  key={idx}
+                  style={{
+                    ...styles.dropdownOption,
+                    ...(value === opt ? styles.dropdownOptionSelected : {}),
+                    ...(hoveredIdx === idx ? styles.dropdownOptionHovered : {}),
+                  }}
+                  onClick={() => handleSelect(opt)}
+                  onMouseEnter={() => setHoveredIdx(idx)}
+                  onMouseLeave={() => setHoveredIdx(null)}
+                >
+                  {opt.length > 60 ? opt.substring(0, 60) + '...' : opt}
+                </div>
+              ))}
+              {filteredOptions.length > 100 && (
+                <div style={styles.dropdownMoreText}>
+                  +{filteredOptions.length - 100} more items...
+                </div>
+              )}
+            </div>
+          ) : (
+            <div style={styles.dropdownNoResults}>No matches found</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BpmlAnalysisPage({
+  data,
+  onClose,
+  bpmlChartData,
+  ocmChartData,
+  changeCategoryChartData,
+  ocmL5ChartData,
+}) {
+  const [page, setPage] = useState(1);
+  const [filters, setFilters] = useState({});
+  const [sortColumn, setSortColumn] = useState(null);
+  const [sortDirection, setSortDirection] = useState('asc'); // 'asc' or 'desc'
+  const pageSize = 15;
+
+  const header = data?.header || [];
+  const allRows = data?.rows || [];
+
+  // Get unique values for each column (for dropdown filters)
+  const uniqueValues = useMemo(() => {
+    const values = {};
+    header.forEach((col, idx) => {
+      const colValues = new Set();
+      allRows.forEach(row => {
+        const val = (row[idx] || '').toString().trim();
+        if (val) colValues.add(val);
+      });
+      values[idx] = Array.from(colValues).sort();
+    });
+    return values;
+  }, [header, allRows]);
+
+  // Filter rows based on selected filters (supports partial text matching)
+  const filteredRows = useMemo(() => {
+    let rows = allRows.filter(row => {
+      return Object.entries(filters).every(([colIdx, filterValue]) => {
+        if (!filterValue) return true;
+        const cellValue = (row[parseInt(colIdx)] || '').toString().trim().toLowerCase();
+        const searchValue = filterValue.toLowerCase();
+        return cellValue.includes(searchValue);
+      });
+    });
+
+    // Apply sorting if a column is selected
+    if (sortColumn !== null) {
+      rows = [...rows].sort((a, b) => {
+        const aVal = (a[sortColumn] || '').toString().trim();
+        const bVal = (b[sortColumn] || '').toString().trim();
+
+        // Try numeric comparison first
+        const aNum = parseFloat(aVal);
+        const bNum = parseFloat(bVal);
+        if (!isNaN(aNum) && !isNaN(bNum)) {
+          return sortDirection === 'asc' ? aNum - bNum : bNum - aNum;
+        }
+
+        // Fallback to string comparison
+        const comparison = aVal.localeCompare(bVal, undefined, { numeric: true, sensitivity: 'base' });
+        return sortDirection === 'asc' ? comparison : -comparison;
+      });
+    }
+
+    return rows;
+  }, [allRows, filters, sortColumn, sortDirection]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
+  const start = (page - 1) * pageSize;
+  const pageRows = filteredRows.slice(start, start + pageSize);
+
+  const handleFilterChange = (colIdx, value) => {
+    setFilters(prev => ({
+      ...prev,
+      [colIdx]: value,
+    }));
+    setPage(1); // Reset to first page when filter changes
+  };
+
+  const handleSort = (colIdx) => {
+    if (sortColumn === colIdx) {
+      // Toggle direction if clicking same column
+      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      // New column, default to ascending
+      setSortColumn(colIdx);
+      setSortDirection('asc');
+    }
+    setPage(1); // Reset to first page when sorting changes
+  };
+
+  const clearAllFilters = () => {
+    setFilters({});
+    setPage(1);
+  };
+
+  const hasActiveFilters = Object.values(filters).some(v => v);
+
+  // Download filtered data as Excel
+  const handleDownloadFiltered = () => {
+    // Create workbook and worksheet
+    const wb = XLSX.utils.book_new();
+
+    // Prepare data with header
+    const wsData = [header, ...filteredRows];
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+
+    // Auto-size columns
+    const colWidths = header.map((h, idx) => {
+      const maxLength = Math.max(
+        (h || '').toString().length,
+        ...filteredRows.slice(0, 100).map(row => (row[idx] || '').toString().length)
+      );
+      return { wch: Math.min(Math.max(maxLength, 10), 50) };
+    });
+    ws['!cols'] = colWidths;
+
+    // Add worksheet to workbook
+    XLSX.utils.book_append_sheet(wb, ws, 'Filtered BPML Data');
+
+    // Generate filename with filter info
+    const filterCount = Object.values(filters).filter(v => v).length;
+    const filename = filterCount > 0
+      ? `BPML_Analysis_Filtered_${filteredRows.length}_rows.xlsx`
+      : `BPML_Analysis_All_${filteredRows.length}_rows.xlsx`;
+
+    // Download
+    XLSX.writeFile(wb, filename);
+  };
+
+  return (
+    <div style={styles.fullPageOverlay}>
+      <div style={styles.fullPageContainer}>
+        {/* Header */}
+        <div style={styles.fullPageHeader}>
+          <div>
+            <h2 style={styles.fullPageTitle}>BPML Analysis</h2>
+            <p style={styles.fullPageSubtitle}>
+              Recommended BPML data with filters and analytics
+            </p>
+          </div>
+          <button style={styles.closeButtonLarge} onClick={onClose} aria-label="Close">
+            ✕
+          </button>
+        </div>
+
+        {/* Scrollable Content */}
+        <div style={styles.fullPageContent}>
+          {/* Data Table Section */}
+          <section style={styles.dataTableSection}>
+            <div style={styles.tableHeaderRow}>
+              <h3 style={styles.sectionTitle}>
+                Recommended BPML Data ({filteredRows.length} of {allRows.length} rows)
+              </h3>
+              <div style={styles.tableHeaderActions}>
+                {hasActiveFilters && (
+                  <button style={styles.clearFiltersBtn} onClick={clearAllFilters}>
+                    Clear All Filters
+                  </button>
+                )}
+                <button style={styles.downloadFilteredBtn} onClick={handleDownloadFiltered}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="7 10 12 15 17 10"></polyline>
+                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                  </svg>
+                  Download Excel
+                </button>
+              </div>
+            </div>
+
+            {/* Filter Row */}
+            <div style={styles.filterRow}>
+              {header.map((col, idx) => (
+                <div key={idx} style={styles.filterItem}>
+                  <label style={styles.filterLabel}>{col || `Column ${idx + 1}`}</label>
+                  <SearchableDropdown
+                    value={filters[idx] || ''}
+                    options={uniqueValues[idx] || []}
+                    onChange={(val) => handleFilterChange(idx, val)}
+                    placeholder="All"
+                  />
+                </div>
+              ))}
+            </div>
+
+            {/* Table */}
+            <div style={styles.fullPageTableWrap}>
+              <table style={styles.table}>
+                <thead>
+                  <tr>
+                    {header.map((h, idx) => (
+                      <th
+                        key={idx}
+                        style={{
+                          ...styles.th,
+                          cursor: 'pointer',
+                          userSelect: 'none',
+                          position: 'relative',
+                          paddingRight: '24px',
+                        }}
+                        onClick={() => handleSort(idx)}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span>{h || '-'}</span>
+                          <span style={{
+                            fontSize: '12px',
+                            opacity: sortColumn === idx ? 1 : 0.3,
+                            transition: 'opacity 0.2s'
+                          }}>
+                            {sortColumn === idx && sortDirection === 'asc' ? '▲' : '▼'}
+                          </span>
+                        </div>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {pageRows.map((row, idx) => (
+                    <tr key={idx}>
+                      {row.map((cell, cIdx) => (
+                        <td key={cIdx} style={styles.td}>
+                          {cell || '-'}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                  {pageRows.length === 0 && (
+                    <tr>
+                      <td style={styles.td} colSpan={header.length || 1}>
+                        No data matching filters
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pagination */}
+            <div style={styles.pagination}>
+              <button
+                style={styles.secondaryButton}
+                onClick={() => setPage(Math.max(1, page - 1))}
+                disabled={page === 1}
+              >
+                Prev
+              </button>
+              <span style={{ fontWeight: 700 }}>
+                Page {page} of {totalPages}
+              </span>
+              <button
+                style={styles.secondaryButton}
+                onClick={() => setPage(Math.min(totalPages, page + 1))}
+                disabled={page === totalPages}
+              >
+                Next
+              </button>
+            </div>
+          </section>
+
+          {/* BPML Analytics Charts Section - Below the data table */}
+          {(bpmlChartData.length > 0 || ocmChartData.length > 0 || changeCategoryChartData.length > 0 || ocmL5ChartData.length > 0) && (
+            <section style={styles.analyticsSection}>
+              <h3 style={styles.sectionTitle}>BPML Analytics</h3>
+              <div style={styles.chartContainer}>
+                {bpmlChartData.length > 0 && (
+                  <div style={styles.chartCard}>
+                    <h4 style={styles.chartTitle}>Unique Sub-Processes by Business Area</h4>
+                    <p style={styles.chartSubtitle}>Level 1 vs Unique Level 4 Count</p>
+                    <ResponsiveContainer width="100%" height={400}>
+                      <PieChart>
+                        <Pie
+                          data={bpmlChartData}
+                          cx="50%"
+                          cy="50%"
+                          labelLine={true}
+                          label={({ name, value, percent }) => `${name}: ${value} (${(percent * 100).toFixed(0)}%)`}
+                          outerRadius={120}
+                          fill="#8884d8"
+                          dataKey="value"
+                        >
+                          {bpmlChartData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip formatter={(value) => [`${value} unique sub-processes`, 'Count']} />
+                        <Legend />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+                {ocmChartData.length > 0 && (
+                  <div style={styles.chartCard}>
+                    <h4 style={styles.chartTitle}>OCM – ECC Vs S4 Transaction Change</h4>
+                    <p style={styles.chartSubtitle}>Level 1 where OCM Valid is not Same or Existing (hover for details)</p>
+                    <ResponsiveContainer width="100%" height={450}>
+                      <BarChart data={ocmChartData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }} barCategoryGap="15%">
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis
+                          dataKey="shortCode"
+                          interval={0}
+                          tick={{ fontSize: 11, fontWeight: 600 }}
+                          height={60}
+                          tickMargin={10}
+                        />
+                        <YAxis />
+                        <Tooltip
+                          content={({ active, payload }) => {
+                            if (active && payload && payload.length) {
+                              const d = payload[0].payload;
+                              return (
+                                <div style={styles.customTooltip}>
+                                  <div style={styles.tooltipTitle}>{d.fullName}</div>
+                                  <div style={styles.tooltipValue}>{d.count} items</div>
+                                </div>
+                              );
+                            }
+                            return null;
+                          }}
+                        />
+                        <Bar dataKey="count" fill="#FD5108" radius={[4, 4, 0, 0]}>
+                          {ocmChartData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+                {changeCategoryChartData.length > 0 && (
+                  <div style={styles.chartCard}>
+                    <h4 style={styles.chartTitle}>Change Category Distribution</h4>
+                    <p style={styles.chartSubtitle}>Count of items by Change Category</p>
+                    <ResponsiveContainer width="100%" height={400}>
+                      <BarChart data={changeCategoryChartData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis
+                          dataKey="name"
+                          angle={-35}
+                          textAnchor="end"
+                          interval={0}
+                          height={120}
+                          tick={{ fontSize: 11 }}
+                        />
+                        <YAxis
+                          domain={[
+                            0,
+                            Math.ceil(Math.max(...changeCategoryChartData.map(d => d.count)) / 10) * 10
+                          ]}
+                          ticks={Array.from(
+                            {
+                              length:
+                                Math.ceil(Math.max(...changeCategoryChartData.map(d => d.count)) / 10) + 1
+                            },
+                            (_, i) => i * 10
+                          )}
+                          allowDecimals={false}
+                        />
+                        <Tooltip formatter={(value) => [`${value} items`, 'Count']} />
+                        <Bar dataKey="count" fill="#FD5108" radius={[4, 4, 0, 0]}>
+                          {changeCategoryChartData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+                {ocmL5ChartData.length > 0 && (
+                  <div style={styles.chartCard}>
+                    <h4 style={styles.chartTitle}>OCM Change Impact - Level 5 Tasks</h4>
+                    <p style={styles.chartSubtitle}>Unique L5 count by Business Area where OCM Valid = 'Change' (Categories: SCH_R, SCH_N, TRN_N, TRN_C, FRC)</p>
+                    <ResponsiveContainer width="100%" height={450}>
+                      <BarChart data={ocmL5ChartData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }} barCategoryGap="15%">
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis
+                          dataKey="shortCode"
+                          interval={0}
+                          tick={{ fontSize: 11, fontWeight: 600 }}
+                          height={60}
+                          tickMargin={10}
+                        />
+                        <YAxis />
+                        <Tooltip
+                          content={({ active, payload }) => {
+                            if (active && payload && payload.length) {
+                              const d = payload[0].payload;
+                              return (
+                                <div style={styles.customTooltip}>
+                                  <div style={styles.tooltipTitle}>{d.fullName}</div>
+                                  <div style={styles.tooltipValue}>{d.count} unique tasks (L5)</div>
+                                </div>
+                              );
+                            }
+                            return null;
+                          }}
+                        />
+                        <Bar dataKey="count" fill="#FD5108" radius={[4, 4, 0, 0]}>
+                          {ocmL5ChartData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
         </div>
       </div>
     </div>
@@ -1833,6 +2424,290 @@ const styles = {
     display: 'flex',
     flexWrap: 'wrap',
     gap: 6,
+  },
+  // BPML Analysis Full Page Styles
+  fullPageOverlay: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    width: '100vw',
+    height: '100vh',
+    background: '#FFF5ED',
+    zIndex: 1000,
+    overflow: 'hidden',
+  },
+  fullPageContainer: {
+    width: '100%',
+    height: '100%',
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  fullPageHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '20px 32px',
+    background: '#FAF7F4',
+    borderBottom: '1px solid #FFCDA8',
+    flexShrink: 0,
+  },
+  fullPageTitle: {
+    margin: 0,
+    fontSize: 24,
+    fontWeight: 700,
+    color: '#1A1A1A',
+  },
+  fullPageSubtitle: {
+    margin: '4px 0 0',
+    color: '#4A4A4A',
+    fontSize: 14,
+  },
+  closeButtonLarge: {
+    background: '#F7F3EF',
+    color: '#1A1A1A',
+    border: '1px solid rgba(0,0,0,0.12)',
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    fontWeight: 700,
+    cursor: 'pointer',
+    fontSize: 20,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    transition: 'all 0.2s',
+  },
+  fullPageContent: {
+    flex: 1,
+    overflow: 'auto',
+    padding: '24px 32px',
+  },
+  analyticsSection: {
+    marginTop: 32,
+    marginBottom: 32,
+  },
+  dataTableSection: {
+    background: '#F7F3EF',
+    borderRadius: 16,
+    padding: 20,
+    boxShadow: '0 8px 22px rgba(0,0,0,0.06)',
+  },
+  tableHeaderRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  tableHeaderActions: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    flexWrap: 'wrap',
+  },
+  downloadFilteredBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    background: '#FD5108',
+    color: '#fff',
+    border: 'none',
+    padding: '10px 16px',
+    borderRadius: 10,
+    fontWeight: 600,
+    cursor: 'pointer',
+    fontSize: 13,
+    boxShadow: '0 4px 12px rgba(253, 81, 8, 0.25)',
+    transition: 'all 0.2s ease',
+  },
+  filterRow: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
+    gap: 12,
+    marginBottom: 16,
+    padding: 16,
+    background: '#FAF7F4',
+    borderRadius: 12,
+    border: '1px solid #FFCDA8',
+  },
+  filterItem: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 4,
+  },
+  filterLabel: {
+    fontSize: 11,
+    fontWeight: 700,
+    color: '#FD5108',
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+  },
+  filterSelect: {
+    padding: '8px 12px',
+    fontSize: 13,
+    fontWeight: 500,
+    color: '#1A1A1A',
+    background: '#fff',
+    border: '1px solid rgba(0,0,0,0.12)',
+    borderRadius: 8,
+    cursor: 'pointer',
+    outline: 'none',
+  },
+  comboboxWrapper: {
+    position: 'relative',
+    display: 'flex',
+    alignItems: 'center',
+  },
+  comboboxInput: {
+    width: '100%',
+    padding: '8px 32px 8px 12px',
+    fontSize: 13,
+    fontWeight: 500,
+    color: '#1A1A1A',
+    background: '#fff',
+    border: '1px solid rgba(0,0,0,0.12)',
+    borderRadius: 8,
+    outline: 'none',
+    boxSizing: 'border-box',
+  },
+  clearInputBtn: {
+    position: 'absolute',
+    right: 8,
+    background: 'transparent',
+    border: 'none',
+    color: '#999',
+    cursor: 'pointer',
+    fontSize: 12,
+    padding: 4,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // Modern Searchable Dropdown Styles
+  searchableDropdown: {
+    position: 'relative',
+    width: '100%',
+  },
+  dropdownInputWrapper: {
+    display: 'flex',
+    alignItems: 'center',
+    background: '#fff',
+    border: '1px solid #e0e0e0',
+    borderRadius: 10,
+    padding: '0 4px 0 0',
+    transition: 'all 0.2s ease',
+    boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+  },
+  dropdownInputWrapperFocused: {
+    borderColor: '#FD5108',
+    boxShadow: '0 0 0 3px rgba(253, 81, 8, 0.1), 0 1px 3px rgba(0,0,0,0.08)',
+  },
+  dropdownInput: {
+    flex: 1,
+    border: 'none',
+    outline: 'none',
+    padding: '10px 12px',
+    fontSize: 13,
+    fontWeight: 500,
+    color: '#1A1A1A',
+    background: 'transparent',
+    borderRadius: 10,
+    minWidth: 0,
+  },
+  dropdownClearBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: '#f5f5f5',
+    border: 'none',
+    borderRadius: 6,
+    width: 24,
+    height: 24,
+    cursor: 'pointer',
+    color: '#666',
+    transition: 'all 0.15s ease',
+    marginRight: 4,
+  },
+  dropdownToggleBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: 'transparent',
+    border: 'none',
+    borderRadius: 6,
+    width: 28,
+    height: 28,
+    cursor: 'pointer',
+    color: '#888',
+    transition: 'all 0.15s ease',
+  },
+  dropdownMenu: {
+    position: 'absolute',
+    top: 'calc(100% + 6px)',
+    left: 0,
+    right: 0,
+    background: '#fff',
+    border: '1px solid #e0e0e0',
+    borderRadius: 12,
+    boxShadow: '0 10px 40px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.08)',
+    zIndex: 1000,
+    overflow: 'hidden',
+  },
+  dropdownOptionsList: {
+    maxHeight: 240,
+    overflowY: 'auto',
+  },
+  dropdownOption: {
+    padding: '10px 14px',
+    fontSize: 13,
+    color: '#333',
+    cursor: 'pointer',
+    transition: 'all 0.1s ease',
+    borderBottom: '1px solid #f5f5f5',
+  },
+  dropdownOptionSelected: {
+    background: '#FFF5ED',
+    color: '#FD5108',
+    fontWeight: 600,
+  },
+  dropdownOptionHovered: {
+    background: '#f8f8f8',
+  },
+  dropdownOptionAll: {
+    color: '#888',
+    fontStyle: 'italic',
+  },
+  dropdownNoResults: {
+    padding: '14px',
+    fontSize: 13,
+    color: '#999',
+    textAlign: 'center',
+    fontStyle: 'italic',
+  },
+  dropdownMoreText: {
+    padding: '10px 14px',
+    fontSize: 12,
+    color: '#888',
+    textAlign: 'center',
+    background: '#fafafa',
+    borderTop: '1px solid #eee',
+  },
+  clearFiltersBtn: {
+    background: '#FFE8D4',
+    color: '#FD5108',
+    border: '1px solid #FFCDA8',
+    padding: '10px 16px',
+    borderRadius: 10,
+    fontWeight: 700,
+    cursor: 'pointer',
+    fontSize: 13,
+  },
+  fullPageTableWrap: {
+    border: '1px solid #FFCDA8',
+    borderRadius: 12,
+    overflow: 'auto',
+    maxHeight: '50vh',
   },
 };
 
