@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState, useEffect } from 'react';
 import pwcLogo from './assets/pwc-logo.png';
-import * as XLSX from 'xlsx';
+import * as XLSX from 'xlsx-js-style';
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
 
 function formatBytes(bytes) {
@@ -227,63 +227,15 @@ export default function App() {
       }
 
       // Shared abbreviation logic for Chart 2 and Chart 4
-      const businessAbbreviations = {
-        'procure to pay': 'P2P',
-        'purchase to pay': 'P2P',
-        'procurement': 'P2P',
-        'order to cash': 'OTC',
-        'record to report': 'RTR',
-        'hire to retire': 'H2R',
-        'plan to produce': 'P2P',
-        'plan to product': 'P2P',
-        'source to pay': 'S2P',
-        'acquire to retire': 'A2R',
-        'finance': 'FIN',
-        'finance & controlling': 'FICO',
-        'financial accounting': 'FI',
-        'controlling': 'CO',
-        'sales': 'SD',
-        'sales & distribution': 'SD',
-        'materials management': 'MM',
-        'production planning': 'PP',
-        'plant maintenance': 'PM',
-        'quality management': 'QM',
-        'human resources': 'HR',
-        'human capital': 'HCM',
-        'supply chain': 'SCM',
-        'supply chain management': 'SCM',
-        'warehouse management': 'WM',
-        'extended warehouse': 'EWM',
-        'transportation': 'TM',
-        'project system': 'PS',
-        'asset management': 'EAM',
-        'enterprise asset': 'EAM',
-        'customer service': 'CS',
-        'global trade': 'GTS',
-        'treasury': 'TRM',
-        'real estate': 'RE',
-        'environment health safety': 'EHS',
-      };
-
-      // Manual overrides for auto-generated abbreviations that need correction
-      const abbreviationOverrides = { 'IIT': 'ITD' };
-
-      const getAbbreviation = (name, index) => {
-        const lower = name.toLowerCase();
-        for (const [key, abbr] of Object.entries(businessAbbreviations)) {
-          if (lower.includes(key)) {
-            return abbr;
-          }
+      // Extract leading capital letters from name (e.g., "OTC Order to Cash" → "OTC")
+      const getAbbreviation = (name) => {
+        if (!name) return '';
+        const match = name.match(/^([A-Z]+)/);
+        if (match && match[1]) {
+          return match[1];
         }
-        // Fallback: take first letter of each word
-        const words = name.split(/[\s&,\-()]+/).filter(w => w.length > 1);
-        let abbr;
-        if (words.length >= 2) {
-          abbr = words.slice(0, 3).map(w => w[0]).join('').toUpperCase();
-        } else {
-          abbr = name.substring(0, 3).toUpperCase();
-        }
-        return abbreviationOverrides[abbr] || abbr;
+        // Fallback: first 3 characters uppercase
+        return name.substring(0, 3).toUpperCase();
       };
 
       // Chart 2: Level 1 vs OCM Valid (New, Change, Existing)
@@ -1175,6 +1127,18 @@ export default function App() {
 // Chart colors
 const CHART_COLORS = ['#FD5108', '#FF7F3E', '#FFB347', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', '#98D8C8', '#F7DC6F'];
 
+// Extract leading capital letters from name as abbreviation
+function getBusinessAbbreviation(name) {
+  if (!name) return '';
+  // Extract leading uppercase letters (e.g., "OTC Order to Cash" → "OTC")
+  const match = name.match(/^([A-Z]+)/);
+  if (match && match[1]) {
+    return match[1];
+  }
+  // Fallback: first 3 characters uppercase
+  return name.substring(0, 3).toUpperCase();
+}
+
 // Custom bar shape that enforces a minimum visible height for stacked segments
 const MIN_BAR_HEIGHT = 6;
 function StackedBarWithMinHeight(props) {
@@ -1368,7 +1332,7 @@ function PreviewPage({
                         if (isFioriOutput && fioriIds.length > 0) {
                           return fioriIds[linkIdx] || fioriIds[0] || `App ${linkIdx + 1}`;
                         }
-                        return `Open BPML${urls.length > 1 ? ` ${linkIdx + 1}` : ''}`;
+                        return `Open KMD${urls.length > 1 ? ` ${linkIdx + 1}` : ''}`;
                       };
 
                       return (
@@ -1689,8 +1653,48 @@ function BpmlAnalysisPage({
   const [sortDirection, setSortDirection] = useState('asc'); // 'asc' or 'desc'
   const pageSize = 25;
 
-  const header = data?.header || [];
-  const allRows = data?.rows || [];
+  const rawHeader = data?.header || [];
+  const rawRows = data?.rows || [];
+
+  // Find column indices to hide (Source Transaction Code)
+  const hiddenColumnIndices = useMemo(() => {
+    const hidden = new Set();
+    rawHeader.forEach((col, idx) => {
+      const colName = (col || '').toString().trim();
+      if (colName === 'Source Transaction Code') {
+        hidden.add(idx);
+      }
+    });
+    return hidden;
+  }, [rawHeader]);
+
+  // Find Sequence No. column index for filtering rows
+  const sequenceColumnIdx = useMemo(() => {
+    return rawHeader.findIndex(col => {
+      const colName = (col || '').toString().trim();
+      return colName === 'Sequence No.';
+    });
+  }, [rawHeader]);
+
+  // Filter out rows where Sequence Number is null/empty
+  const rowsWithSequence = useMemo(() => {
+    if (sequenceColumnIdx === -1) return rawRows;
+    return rawRows.filter(row => {
+      const seqValue = (row[sequenceColumnIdx] || '').toString().trim();
+      return seqValue !== '' && seqValue.toLowerCase() !== 'null';
+    });
+  }, [rawRows, sequenceColumnIdx]);
+
+  // Create header and rows without hidden columns
+  const header = useMemo(() => {
+    return rawHeader.filter((_, idx) => !hiddenColumnIndices.has(idx));
+  }, [rawHeader, hiddenColumnIndices]);
+
+  const allRows = useMemo(() => {
+    return rowsWithSequence.map(row =>
+      row.filter((_, idx) => !hiddenColumnIndices.has(idx))
+    );
+  }, [rowsWithSequence, hiddenColumnIndices]);
 
   // Define which columns should have filters
   const filterColumnNames = [
@@ -1824,6 +1828,27 @@ function BpmlAnalysisPage({
       return { wch: Math.min(Math.max(maxLength, 10), 50) };
     });
     ws['!cols'] = colWidths;
+
+    // Style header row - bold only
+    header.forEach((_, idx) => {
+      const cellRef = XLSX.utils.encode_cell({ r: 0, c: idx });
+      if (ws[cellRef]) {
+        ws[cellRef].s = { font: { bold: true } };
+      }
+    });
+
+    // Add hyperlinks for URL cells
+    filteredRows.forEach((row, rowIdx) => {
+      row.forEach((cell, colIdx) => {
+        const cellStr = (cell || '').toString();
+        if (cellStr.startsWith('http://') || cellStr.startsWith('https://')) {
+          const cellRef = XLSX.utils.encode_cell({ r: rowIdx + 1, c: colIdx });
+          if (ws[cellRef]) {
+            ws[cellRef].l = { Target: cellStr, Tooltip: cellStr };
+          }
+        }
+      });
+    });
 
     // Add worksheet to workbook
     XLSX.utils.book_append_sheet(wb, ws, 'Filtered BPML Data');
@@ -1970,7 +1995,7 @@ function BpmlAnalysisPage({
           </section>
 
           {/* BPML Analytics Charts Section - Below the data table */}
-          {(bpmlChartData.length > 0 || ocmChartData.length > 0 || changeCategoryChartData.length > 0 || ocmL5ChartData.length > 0) && (
+          {(bpmlChartData.length > 0 || ocmChartData.length > 0 || changeCategoryChartData.length > 0) && (
             <section style={styles.analyticsSection}>
               <h3 style={styles.sectionTitle}>BPML Analytics</h3>
               <div style={styles.chartContainer}>
@@ -1978,14 +2003,17 @@ function BpmlAnalysisPage({
                   <div style={styles.chartCard}>
                     <h4 style={styles.chartTitle}>Unique Sub-Processes by Business Area</h4>
                     <p style={styles.chartSubtitle}>Level 1 vs Unique Level 4 Count</p>
-                    <ResponsiveContainer width="100%" height={400}>
+                    <ResponsiveContainer width="100%" height={350}>
                       <PieChart>
                         <Pie
                           data={bpmlChartData}
                           cx="50%"
                           cy="50%"
                           labelLine={true}
-                          label={({ name, value, percent }) => `${name}: ${value} (${(percent * 100).toFixed(0)}%)`}
+                          label={({ name, value }) => {
+                            const abbr = getBusinessAbbreviation(name);
+                            return `${abbr}: ${value}`;
+                          }}
                           outerRadius={120}
                           fill="#8884d8"
                           dataKey="value"
@@ -1994,10 +2022,26 @@ function BpmlAnalysisPage({
                             <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
                           ))}
                         </Pie>
-                        <Tooltip formatter={(value) => [`${value} unique sub-processes`, 'Count']} />
-                        <Legend />
+                        <Tooltip
+                          formatter={(value, name) => [`${value} unique sub-processes`, name]}
+                        />
                       </PieChart>
                     </ResponsiveContainer>
+                    {/* Custom Legend with abbreviations and full names */}
+                    <div style={styles.pieChartLegend}>
+                      {bpmlChartData.map((entry, index) => (
+                        <div key={index} style={styles.pieChartLegendItem}>
+                          <span
+                            style={{
+                              ...styles.pieChartLegendColor,
+                              backgroundColor: CHART_COLORS[index % CHART_COLORS.length]
+                            }}
+                          />
+                          <span style={styles.pieChartLegendAbbr}>{getBusinessAbbreviation(entry.name)}</span>
+                          <span style={styles.pieChartLegendName}>- {entry.name}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
                 {ocmChartData.length > 0 && (
@@ -2038,27 +2082,35 @@ function BpmlAnalysisPage({
                           }}
                         />
                         <Legend wrapperStyle={{ paddingTop: 10, fontSize: 12 }} />
-                        <Bar dataKey="New" fill="#4ECDC4" radius={[4, 4, 0, 0]} />
-                        <Bar dataKey="Change" fill="#FD5108" radius={[4, 4, 0, 0]} />
-                        <Bar dataKey="Existing" fill="#45B7D1" radius={[4, 4, 0, 0]} />
+                        <Bar dataKey="New" fill="#5088e0ff" radius={[4, 4, 0, 0]} />
+                        <Bar dataKey="Change" fill="#f02222ff" radius={[4, 4, 0, 0]} />
+                        <Bar dataKey="Existing" fill="#64ce8bff" radius={[4, 4, 0, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
+                    {/* Abbreviation legend (no colors - colors are for New/Change/Existing) */}
+                    <div style={styles.pieChartLegend}>
+                      {ocmChartData.map((entry, index) => (
+                        <div key={index} style={styles.pieChartLegendItem}>
+                          <span style={styles.pieChartLegendAbbr}>{entry.shortCode}</span>
+                          <span style={styles.pieChartLegendName}>- {entry.fullName}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
                 {changeCategoryChartData.length > 0 && stackedCategoryL1Keys.length > 0 && (
                   <div style={styles.chartCard}>
                     <h4 style={styles.chartTitle}>Change Category Distribution</h4>
                     <p style={styles.chartSubtitle}>Count by Change Category, stacked by Level 1 – Business/Enterprise Area</p>
-                    <ResponsiveContainer width="100%" height={450}>
-                      <BarChart data={changeCategoryChartData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
+                    <ResponsiveContainer width="100%" height={400}>
+                      <BarChart data={changeCategoryChartData} margin={{ top: 20, right: 30, left: 20, bottom: 40 }}>
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis
-                          dataKey="name"
-                          angle={-35}
-                          textAnchor="end"
+                          dataKey="code"
                           interval={0}
-                          height={120}
-                          tick={{ fontSize: 11 }}
+                          tick={{ fontSize: 11, fontWeight: 600 }}
+                          height={50}
+                          tickMargin={10}
                         />
                         <YAxis
                           allowDecimals={false}
@@ -2070,16 +2122,17 @@ function BpmlAnalysisPage({
                           })()}
                         />
                         <Tooltip
-                          content={({ active, payload, label }) => {
+                          content={({ active, payload }) => {
                             if (active && payload && payload.length) {
+                              const d = payload[0]?.payload;
                               const total = payload.reduce((sum, p) => sum + (p.value || 0), 0);
                               return (
                                 <div style={styles.customTooltip}>
-                                  <div style={styles.tooltipTitle}>{label}</div>
+                                  <div style={styles.tooltipTitle}>{d?.name || d?.code}</div>
                                   {payload.map((p, i) => (
                                     p.value > 0 && (
                                       <div key={i} style={{ ...styles.tooltipValue, color: p.color }}>
-                                        {p.name}: {p.value}
+                                        {getBusinessAbbreviation(p.name)}: {p.value}
                                       </div>
                                     )
                                   ))}
@@ -2092,50 +2145,20 @@ function BpmlAnalysisPage({
                             return null;
                           }}
                         />
-                        <Legend wrapperStyle={{ paddingTop: 10, fontSize: 11 }} />
                         {stackedCategoryL1Keys.map((l1, index) => (
                           <Bar key={l1} dataKey={l1} stackId="a" fill={CHART_COLORS[index % CHART_COLORS.length]} shape={<StackedBarWithMinHeight />} />
                         ))}
                       </BarChart>
                     </ResponsiveContainer>
-                  </div>
-                )}
-                {ocmL5ChartData.length > 0 && (
-                  <div style={styles.chartCard}>
-                    <h4 style={styles.chartTitle}>OCM Change Impact - Level 5 Tasks</h4>
-                    <p style={styles.chartSubtitle}>Unique L5 count by Business Area where OCM Valid = 'Change' (Categories: SCH_R, SCH_N, TRN_N, TRN_C, FRC)</p>
-                    <ResponsiveContainer width="100%" height={450}>
-                      <BarChart data={ocmL5ChartData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }} barCategoryGap="15%">
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis
-                          dataKey="shortCode"
-                          interval={0}
-                          tick={{ fontSize: 11, fontWeight: 600 }}
-                          height={60}
-                          tickMargin={10}
-                        />
-                        <YAxis />
-                        <Tooltip
-                          content={({ active, payload }) => {
-                            if (active && payload && payload.length) {
-                              const d = payload[0].payload;
-                              return (
-                                <div style={styles.customTooltip}>
-                                  <div style={styles.tooltipTitle}>{d.fullName}</div>
-                                  <div style={styles.tooltipValue}>{d.count} unique tasks (L5)</div>
-                                </div>
-                              );
-                            }
-                            return null;
-                          }}
-                        />
-                        <Bar dataKey="count" fill="#FD5108" radius={[4, 4, 0, 0]}>
-                          {ocmL5ChartData.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
-                          ))}
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
+                    {/* Code legend below the chart */}
+                    <div style={styles.pieChartLegend}>
+                      {changeCategoryChartData.map((entry, index) => (
+                        <div key={index} style={styles.pieChartLegendItem}>
+                          <span style={styles.pieChartLegendAbbr}>{entry.code}</span>
+                          <span style={styles.pieChartLegendName}>- {entry.name}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
@@ -2196,16 +2219,24 @@ function TestingScopePage({
   const handleDownload = () => {
     if (sortedData.length === 0) return;
 
-    const header = [l1ColName || 'Level 1', l4ColName || 'Level 4', l5ColName || 'Task (L5)'];
-    const wsData = [header, ...sortedData.map(row => [row.l1, row.l4, row.l5])];
+    const headerRow = [l1ColName || 'Level 1', l4ColName || 'Level 4', l5ColName || 'Task (L5)'];
+    const wsData = [headerRow, ...sortedData.map(row => [row.l1, row.l4, row.l5])];
     const ws = XLSX.utils.aoa_to_sheet(wsData);
 
     // Set column widths
-    ws['!cols'] = header.map((h, idx) => ({
+    ws['!cols'] = headerRow.map((h, idx) => ({
       wch: Math.max(h.length, ...sortedData.slice(0, 100).map(row =>
         (idx === 0 ? row.l1 : idx === 1 ? row.l4 : row.l5).length
       )) + 2
     }));
+
+    // Style header row - bold only
+    headerRow.forEach((_, idx) => {
+      const cellRef = XLSX.utils.encode_cell({ r: 0, c: idx });
+      if (ws[cellRef]) {
+        ws[cellRef].s = { font: { bold: true } };
+      }
+    });
 
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Testing Scope');
@@ -2925,6 +2956,36 @@ const styles = {
   chartSubtitle: {
     margin: '0 0 16px',
     fontSize: 13,
+    color: '#4A4A4A',
+  },
+  pieChartLegend: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 8,
+    marginTop: 16,
+    padding: '12px 16px',
+    background: '#fff',
+    borderRadius: 8,
+    border: '1px solid rgba(0,0,0,0.08)',
+  },
+  pieChartLegendItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    fontSize: 13,
+  },
+  pieChartLegendColor: {
+    width: 14,
+    height: 14,
+    borderRadius: 3,
+    flexShrink: 0,
+  },
+  pieChartLegendAbbr: {
+    fontWeight: 700,
+    color: '#1A1A1A',
+    minWidth: 45,
+  },
+  pieChartLegendName: {
     color: '#4A4A4A',
   },
   customTooltip: {

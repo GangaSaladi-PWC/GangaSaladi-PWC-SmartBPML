@@ -1031,7 +1031,6 @@ app.post('/api/download-docx', upload.single('file'), async (req, res) => {
     ];
     ws1.addRows(allItems);
     ws1.getRow(1).font = { bold: true };
-    ws1.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE0B13C' } };
     makeSapNoteHyperlinks(ws1, 4); // SAP Note is column 4
 
     // Sheet 2: Simplification Items
@@ -1046,7 +1045,6 @@ app.post('/api/download-docx', upload.single('file'), async (req, res) => {
     ];
     ws2.addRows(simplificationItems);
     ws2.getRow(1).font = { bold: true };
-    ws2.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE0B13C' } };
     makeSapNoteHyperlinks(ws2, 4); // SAP Note is column 4
 
     // Sheet 3: Summary with pivot table
@@ -1057,7 +1055,6 @@ app.post('/api/download-docx', upload.single('file'), async (req, res) => {
       ws3.addRow(row);
       if (idx === 0 || idx === pivotData.length - 1) {
         ws3.getRow(idx + 1).font = { bold: true };
-        ws3.getRow(idx + 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE0B13C' } };
       }
     });
 
@@ -1074,7 +1071,6 @@ app.post('/api/download-docx', upload.single('file'), async (req, res) => {
     ];
     ws4.addRows(kmdDispositions);
     ws4.getRow(1).font = { bold: true };
-    ws4.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE0B13C' } };
 
     // Make links clickable
     kmdDispositions.forEach((item, idx) => {
