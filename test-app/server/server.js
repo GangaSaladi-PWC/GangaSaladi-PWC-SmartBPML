@@ -276,7 +276,7 @@ function mapWithKMD(extractedData) {
   }
 
   const kmdWb = xlsx.readFile(staticWorkbookPath);
-  const kmdSheetName = kmdWb.SheetNames.find(n => n.toLowerCase().includes('kmd')) || kmdWb.SheetNames[0];
+  const kmdSheetName = kmdWb.SheetNames.find(n => n.trim() === 'KMD Repository - 2023') || kmdWb.SheetNames[0];
   const kmdSheet = kmdWb.Sheets[kmdSheetName];
   const kmdRows = xlsx.utils.sheet_to_json(kmdSheet, { header: 1, defval: '' });
 
@@ -417,7 +417,7 @@ function createKMDDispositions(simplificationItems) {
 
   // Read KMD file
   const kmdWb = xlsx.readFile(staticWorkbookPath);
-  const kmdSheetName = kmdWb.SheetNames.find(n => n.toLowerCase().includes('kmd')) || kmdWb.SheetNames[0];
+  const kmdSheetName = kmdWb.SheetNames.find(n => n.trim() === 'KMD Repository - 2023') || kmdWb.SheetNames[0];
   const kmdSheet = kmdWb.Sheets[kmdSheetName];
   const kmdRows = xlsx.utils.sheet_to_json(kmdSheet, { header: 1, defval: '' });
 
@@ -511,7 +511,7 @@ async function buildMerged(uploadBuffer) {
   }
   const uploadSheet = uploadWb.Sheets[targetUploadSheetName];
   const targetStaticSheetName =
-    staticWb.SheetNames.find((n) => n.trim().toLowerCase() === 'kmd repository - 2023') ||
+    staticWb.SheetNames.find((n) => n.trim() === 'KMD Repository - 2023') ||
     staticWb.SheetNames[0];
   const staticSheet = staticWb.Sheets[targetStaticSheetName];
   if (!uploadSheet || !staticSheet) {

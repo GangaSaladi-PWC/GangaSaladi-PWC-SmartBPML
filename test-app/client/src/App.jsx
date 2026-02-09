@@ -464,7 +464,7 @@ export default function App() {
     setPreviewIdx(null);
     setView('main');
 
-    // Clear chart data if BPML file is deleted
+    // Clear chart data and Fiori state if BPML file is deleted
     if (cardIdx === 0) {
       setBpmlChartData([]);
       setOcmChartData([]);
@@ -472,6 +472,9 @@ export default function App() {
       setOcmL5ChartData([]);
       setBpmlAnalysisData(null);
       setShowBpmlAnalysis(false);
+      setFioriOutput(null);
+      setFioriBlob(null);
+      setFioriProgress(0);
     }
   };
 
@@ -599,6 +602,9 @@ export default function App() {
     setLoading(true);
     setError('');
     setOutputs([]);
+    setFioriOutput(null);
+    setFioriBlob(null);
+    setFioriProgress(0);
     setPreviewIdx(null);
     setView('main');
     try {
