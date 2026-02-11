@@ -1,0 +1,7 @@
+node_modules
+Smart-BPML/client/node_modules
+Smart-BPML/server/node_modules
+Smart-BPML/client/dist
+.git
+
+*.md

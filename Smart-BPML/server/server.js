@@ -18,9 +18,16 @@ const app = express();
 const PORT = process.env.PORT || 4000;
 
 // Configure middleware
-app.use(cors({ origin: 'http://localhost:5173', credentials: true }));
+const corsOrigin = process.env.NODE_ENV === 'production' ? false : 'http://localhost:5173';
+app.use(cors({ origin: corsOrigin, credentials: true }));
 app.use(express.json());
 app.use(morgan('dev'));
+
+// Serve built frontend in production
+const publicDir = path.join(__dirname, 'public');
+if (fs.existsSync(publicDir)) {
+  app.use(express.static(publicDir));
+}
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -1357,6 +1364,14 @@ app.post('/api/fetch-fiori-apps', upload.single('file'), async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch Fiori apps', details: err.message });
   }
 });
+
+// SPA catch-all: serve index.html for non-API routes in production
+const indexPath = path.join(__dirname, 'public', 'index.html');
+if (fs.existsSync(indexPath)) {
+  app.get('*', (req, res) => {
+    res.sendFile(indexPath);
+  });
+}
 
 app.use((err, req, res, next) => {
   console.error(err);

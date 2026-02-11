@@ -1,0 +1,141 @@
+# SmartBPML - Azure DevOps Pipeline (stage-control pattern)
+# - Infra stage placeholder (PwC CAAS pool)
+# - Build stage uses ubuntu-latest (Docker available)
+
+trigger:
+- main
+
+parameters:
+- name: Stage
+  displayName: 'Stage to run'
+  type: string
+  default: 'Build'
+  values:
+  - All
+  - Infra
+  - Build
+  - Deploy
+  - Build,Deploy
+  - Infra,Build
+
+# Default pool for infra stage
+pool:
+  name: Asset-Forge-CAAS-Agent-Pool
+
+variables:
+- group: SmartBPML-Variables   # Create this Variable Group in ADO Library later
+
+# Provide safe defaults so the pipeline doesn't fail before variable group is wired.
+# These can be overridden by the variable group.
+- name: IMAGE_REPO
+  value: smartbpml-app
+
+stages:
+
+# 1) INFRA (placeholder - only run when Terraform/TFE is ready)
+- stage: Infra
+  displayName: '1. Infra (Terraform/TFE)'
+  condition: or(contains('${{ parameters.Stage }}', 'All'),
+                contains('${{ parameters.Stage }}', 'Infra'))
+  jobs:
+  - job: TerraformApply
+    displayName: 'Terraform Apply (placeholder)'
+    steps:
+    - script: |
+        echo "Infra stage placeholder."
+        echo "Pipeline automates infra -> build -> deploy."
+      displayName: 'INFO'
+
+# 2) CONTAINER BUILD & PUSH
+- stage: Build
+  displayName: '2. Build & Push Container'
+  condition: or(contains('${{ parameters.Stage }}', 'All'),
+                contains('${{ parameters.Stage }}', 'Build'))
+  jobs:
+  - job: DockerBuildPush
+    displayName: 'Docker Build & Push'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - script: |
+        set -e
+        echo "Docker version:"
+        docker --version
+        echo "Repo root contents:"
+        ls -la
+      displayName: "DEBUG: Check Docker + workspace"
+
+    - script: |
+        set -e
+        echo "Building image..."
+        echo "IMAGE_REPO=$(IMAGE_REPO)"
+        docker build -t $(IMAGE_REPO):$(Build.BuildId) .
+      displayName: "Docker build"
+
+    # Safe-skip: will SKIP if ACR variables are not set yet.
+    - script: |
+        set -e
+        echo "Attempting ACR push (will skip if vars are missing)..."
+
+        if [ -z "$(ACR_LOGIN_SERVER)" ] || [ -z "$(ACR_USERNAME)" ] || [ -z "$(ACR_PASSWORD)" ]; then
+          echo "SKIP: ACR variables not set (ACR_LOGIN_SERVER/ACR_USERNAME/ACR_PASSWORD)."
+          exit 0
+        fi
+
+        echo "$(ACR_PASSWORD)" | docker login "$(ACR_LOGIN_SERVER)" -u "$(ACR_USERNAME)" --password-stdin
+
+        echo "Tagging..."
+        docker tag $(IMAGE_REPO):$(Build.BuildId) "$(ACR_LOGIN_SERVER)/$(IMAGE_REPO):$(Build.BuildId)"
+        docker tag $(IMAGE_REPO):$(Build.BuildId) "$(ACR_LOGIN_SERVER)/$(IMAGE_REPO):latest"
+
+        echo "Pushing..."
+        docker push "$(ACR_LOGIN_SERVER)/$(IMAGE_REPO):$(Build.BuildId)"
+        docker push "$(ACR_LOGIN_SERVER)/$(IMAGE_REPO):latest"
+
+        echo "ACR push completed."
+      displayName: "Docker login + tag + push to ACR (safe-skip)"
+
+# 3) DEPLOY (safe-skip until Web App + Service Connection exist)
+- stage: Deploy
+  displayName: '3. Deploy to Azure Web App'
+  condition: or(contains('${{ parameters.Stage }}', 'All'),
+                contains('${{ parameters.Stage }}', 'Deploy'))
+  jobs:
+  - job: DeployWebApp
+    displayName: 'Deploy container to Web App (safe-skip)'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - script: |
+        echo "Deploy stage starting..."
+        echo "Required vars (when ready): AZURE_SERVICE_CONNECTION, WEBAPP_NAME, RESOURCE_GROUP, ACR_LOGIN_SERVER, IMAGE_REPO"
+        echo "Reminder: set WEBSITES_PORT=4000 in App Service config."
+      displayName: 'INFO'
+
+    # Safe-skip if vars missing.
+    - task: AzureCLI@2
+      displayName: 'Set Web App container image (safe-skip)'
+      condition: and(succeeded(),
+                     ne(variables['AZURE_SERVICE_CONNECTION'], ''),
+                     ne(variables['WEBAPP_NAME'], ''),
+                     ne(variables['RESOURCE_GROUP'], ''),
+                     ne(variables['ACR_LOGIN_SERVER'], ''),
+                     ne(variables['IMAGE_REPO'], ''))
+      inputs:
+        azureSubscription: $(AZURE_SERVICE_CONNECTION)
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          set -e
+          echo "Deploying image to Web App..."
+          IMAGE="$(ACR_LOGIN_SERVER)/$(IMAGE_REPO):$(Build.BuildId)"
+          echo "Image: $IMAGE"
+          echo "WebApp: $(WEBAPP_NAME)"
+          echo "RG: $(RESOURCE_GROUP)"
+
+          az webapp config container set \
+            --name "$(WEBAPP_NAME)" \
+            --resource-group "$(RESOURCE_GROUP)" \
+            --docker-custom-image-name "$IMAGE"
+
+          echo "NOTE: Ensure WEBSITES_PORT=4000 is set in App Service settings."
