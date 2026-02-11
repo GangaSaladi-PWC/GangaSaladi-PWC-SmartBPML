@@ -750,7 +750,7 @@ function ensureStaticWorkbook() {
 
 ensureStaticWorkbook();
 
-app.get('/api/health', (req, res) => {
+app.get('/api/healthz', (req, res) => {
   res.json({ status: 'ok' });
 });
 

@@ -148,3 +148,29 @@ stages:
             --output none
 
           echo "Container and WEBSITES_PORT configured."
+
+    # Health check: wait for app to respond on /api/healthz (same condition as deploy)
+    - script: |
+        set -e
+        BASE_URL="https://$(WEBAPP_NAME).azurewebsites.net"
+        HEALTH_URL="${BASE_URL}/api/healthz"
+        echo "Waiting 60s for container to start..."
+        sleep 60
+        echo "Polling $HEALTH_URL (max 5 min)..."
+        for i in $(seq 1 30); do
+          if curl -sf --max-time 10 "$HEALTH_URL" > /dev/null; then
+            echo "Health check OK: $HEALTH_URL returned 200."
+            exit 0
+          fi
+          echo "Attempt $i/30: not ready yet, retrying in 10s..."
+          sleep 10
+        done
+        echo "Health check failed: $HEALTH_URL did not return 200 within 5 minutes."
+        exit 1
+      displayName: 'Health check (wait for /api/healthz)'
+      condition: and(succeeded(),
+                     ne(variables['AZURE_SERVICE_CONNECTION'], ''),
+                     ne(variables['WEBAPP_NAME'], ''),
+                     ne(variables['RESOURCE_GROUP'], ''),
+                     ne(variables['ACR_LOGIN_SERVER'], ''),
+                     ne(variables['IMAGE_REPO'], ''))
