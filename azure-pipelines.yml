@@ -29,6 +29,8 @@ variables:
 # These can be overridden by the variable group.
 - name: IMAGE_REPO
   value: smartbpml-app
+- name: WEBSITES_PORT
+  value: '4000'
 
 stages:
 
@@ -109,7 +111,7 @@ stages:
     - script: |
         echo "Deploy stage starting..."
         echo "Required vars (when ready): AZURE_SERVICE_CONNECTION, WEBAPP_NAME, RESOURCE_GROUP, ACR_LOGIN_SERVER, IMAGE_REPO"
-        echo "Reminder: set WEBSITES_PORT=4000 in App Service config."
+        echo "WEBSITES_PORT will be set to $(WEBSITES_PORT) by the pipeline."
       displayName: 'INFO'
 
     # Safe-skip if vars missing.
@@ -138,4 +140,11 @@ stages:
             --resource-group "$(RESOURCE_GROUP)" \
             --docker-custom-image-name "$IMAGE"
 
-          echo "NOTE: Ensure WEBSITES_PORT=4000 is set in App Service settings."
+          echo "Setting WEBSITES_PORT=$(WEBSITES_PORT) on Web App..."
+          az webapp config appsettings set \
+            --name "$(WEBAPP_NAME)" \
+            --resource-group "$(RESOURCE_GROUP)" \
+            --settings WEBSITES_PORT="$(WEBSITES_PORT)" \
+            --output none
+
+          echo "Container and WEBSITES_PORT configured."
