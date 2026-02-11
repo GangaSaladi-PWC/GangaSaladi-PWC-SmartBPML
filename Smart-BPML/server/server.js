@@ -10,6 +10,7 @@ import PizZip from 'pizzip';
 import { DOMParser } from '@xmldom/xmldom';
 import ExcelJS from 'exceljs';
 import { execSync } from 'child_process';
+import os from 'os';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1088,8 +1089,8 @@ app.post('/api/download-docx', upload.single('file'), async (req, res) => {
       }
     });
 
-    // Write to temporary file
-    const tempPath = path.join(__dirname, `temp-${Date.now()}.xlsx`);
+    // Write to temporary file (use os.tmpdir() so Azure App Service can write; app dir may be read-only)
+    const tempPath = path.join(os.tmpdir(), `temp-${Date.now()}.xlsx`);
     console.log('Writing to temp file:', tempPath);
 
     let buffer;
