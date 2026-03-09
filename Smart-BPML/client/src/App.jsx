@@ -14,7 +14,7 @@ function formatBytes(bytes) {
 export default function App() {
   const API_BASE = import.meta.env.VITE_API_BASE ?? '';
   const [cards, setCards] = useState([
-    { title: 'L1-L5 BPML File', subtitle: 'Supported: Excel (xlsx / xlsm)', fileType: 'xlsx', file: null },
+    { title: 'Generated BPML File', subtitle: 'Supported: Excel (xlsx / xlsm)', fileType: 'xlsx', file: null },
     { title: 'Readiness Check File', subtitle: 'Supported: Word (.docx)', fileType: 'docx', file: null },
   ]);
   const [activeCard, setActiveCard] = useState(0);
@@ -151,7 +151,7 @@ export default function App() {
         const l5ColName = headers[l5Idx];
 
         // Same filter criteria as the bar chart
-        const validChangeCategories = ['SCH_R', 'SCH_N', 'TRN_N', 'TRN_C', 'FRC'];
+        const validChangeCategories = ['SCH_R', 'SCH_N', 'TRN_N', 'TRN_C', 'FRC', 'PRC'];
 
         // Build L1 -> Map of L5 -> L4 (for unique L5 per L1 with their L4)
         const l1ToL5L4Map = new Map();
@@ -164,7 +164,7 @@ export default function App() {
           const changeCategory = (row[changeCategoryIdx] ?? '').toString().trim().toUpperCase();
 
           // Apply same filter as bar chart: OCM Valid = 'Change' AND valid Change Category
-          if (l1 && l5 && ocmValid === 'change' && validChangeCategories.includes(changeCategory)) {
+          if (l1 && l5 && (ocmValid === 'change' || ocmValid === 'new') && validChangeCategories.includes(changeCategory)) {
             if (!l1ToL5L4Map.has(l1)) {
               l1ToL5L4Map.set(l1, new Map());
             }
@@ -220,6 +220,7 @@ export default function App() {
           .map(([l1, l4Set]) => ({
             name: l1,
             value: l4Set.size,
+            subProcesses: [...l4Set].sort(),
           }))
           .filter(item => item.name && item.value > 0);
         setBpmlChartData(chartData);
@@ -345,7 +346,7 @@ export default function App() {
 
       if (l1Idx !== -1 && l5Idx !== -1 && ocmIdx !== -1 && changeCategoryIdx !== -1) {
         // Specific Change Category values to include
-        const validChangeCategories = ['SCH_R', 'SCH_N', 'TRN_N', 'TRN_C', 'FRC'];
+        const validChangeCategories = ['SCH_R', 'SCH_N', 'TRN_N', 'TRN_C', 'FRC', 'PRC'];
         const l1ToL5Map = new Map();
         let matchedRows = 0;
         let ocmChangeCount = 0;
@@ -370,7 +371,7 @@ export default function App() {
           if (ocmValid === 'change' && validChangeCategories.includes(changeCategory)) bothConditionsCount++;
 
           // Only include rows where OCM Valid = 'Change' AND Change Category matches one of the specified values
-          if (l1 && l5 && ocmValid === 'change' && validChangeCategories.includes(changeCategory)) {
+          if (l1 && l5 && (ocmValid === 'change' || ocmValid === 'new') && validChangeCategories.includes(changeCategory)) {
             matchedRows++;
             if (!l1ToL5Map.has(l1)) {
               l1ToL5Map.set(l1, new Set());
@@ -601,19 +602,25 @@ export default function App() {
     if (!hasFile) return;
     setLoading(true);
     setError('');
-    setOutputs([]);
-    setFioriOutput(null);
-    setFioriBlob(null);
-    setFioriProgress(0);
     setPreviewIdx(null);
     setView('main');
     try {
+      // Only process files that don't already have a completed output
       const filesToProcess = cards
         .map((c, idx) => ({ file: c.file, cardIdx: idx }))
-        .filter((f) => f.file)
+        .filter(({ file, cardIdx }) => {
+          if (!file) return false;
+          const existing = outputs.find(o => o.cardIdx === cardIdx);
+          return !existing?.done;
+        })
         .slice(0, 2);
 
-      // Process all files in parallel
+      if (filesToProcess.length === 0) return;
+
+      // Only clear outputs for cards that will be (re)processed
+      const cardIdxSet = new Set(filesToProcess.map(f => f.cardIdx));
+      setOutputs(prev => prev.filter(o => !cardIdxSet.has(o.cardIdx)));
+
       await Promise.all(
         filesToProcess.map(item => processFile(item.file, item.cardIdx, fioriVersion))
       );
@@ -689,7 +696,9 @@ export default function App() {
     setFioriLoading(true);
 
     try {
+      await new Promise(r => setTimeout(r, 50)); // flush render at 10%
       setFioriProgress(30);
+      await new Promise(r => setTimeout(r, 50)); // flush render at 30%
 
       const data = new FormData();
       data.append('file', bpmlFile);
@@ -995,18 +1004,6 @@ export default function App() {
           </div>
         </div>
 
-        {(fioriLoading || fioriOutput) && (
-          <div style={styles.progressWrap}>
-            <div style={styles.progressMeta}>
-              <div style={styles.progressLabel}>Fiori Mapping Progress</div>
-              <div style={styles.progressPct}>{fioriProgress}%</div>
-            </div>
-            <div style={styles.progressBarOuter}>
-              <div style={{ ...styles.progressBarInner, width: `${fioriProgress}%` }} />
-            </div>
-          </div>
-        )}
-
         <div style={styles.summaryRow}>
           {/* BPML Analysis Tile - Only enabled when L1-L5 BPML file is uploaded */}
           <SummaryCard
@@ -1062,7 +1059,7 @@ export default function App() {
           <SummaryCard
             key="fiori-output"
             title="BPML - FIORI Mapping"
-            output={fioriOutput}
+            output={fioriLoading ? { progress: fioriProgress, done: false } : fioriOutput}
             onPreview={() => {
               if (fioriOutput?.done) {
                 setPreviewIdx('fiori');
@@ -1657,6 +1654,7 @@ function BpmlAnalysisPage({
   const [filters, setFilters] = useState({});
   const [sortColumn, setSortColumn] = useState(null);
   const [sortDirection, setSortDirection] = useState('asc'); // 'asc' or 'desc'
+  const [drilldown, setDrilldown] = useState(null); // { name, subProcesses, color }
   const pageSize = 25;
 
   const rawHeader = data?.header || [];
@@ -2008,7 +2006,7 @@ function BpmlAnalysisPage({
                 {bpmlChartData.length > 0 && (
                   <div style={styles.chartCard}>
                     <h4 style={styles.chartTitle}>Unique Sub-Processes by Business Area</h4>
-                    <p style={styles.chartSubtitle}>Level 1 vs Unique Level 4 Count</p>
+                    <p style={styles.chartSubtitle}>Level 1 vs Unique Level 4 Count · <span style={{ color: '#FD5108', fontWeight: 600 }}>Tap a slice to explore</span></p>
                     <ResponsiveContainer width="100%" height={350}>
                       <PieChart>
                         <Pie
@@ -2023,6 +2021,14 @@ function BpmlAnalysisPage({
                           outerRadius={120}
                           fill="#8884d8"
                           dataKey="value"
+                          onClick={(entry, index) => {
+                            setDrilldown({
+                              name: entry.name,
+                              subProcesses: entry.subProcesses || [],
+                              color: CHART_COLORS[index % CHART_COLORS.length],
+                            });
+                          }}
+                          style={{ cursor: 'pointer' }}
                         >
                           {bpmlChartData.map((entry, index) => (
                             <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
@@ -2170,6 +2176,132 @@ function BpmlAnalysisPage({
               </div>
             </section>
           )}
+        </div>
+      </div>
+
+      {/* iOS-style drill-down bottom sheet */}
+      {drilldown && (
+        <DrillDownSheet
+          name={drilldown.name}
+          subProcesses={drilldown.subProcesses}
+          color={drilldown.color}
+          onClose={() => setDrilldown(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function DrillDownSheet({ name, subProcesses, color, onClose }) {
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    // Trigger slide-up animation after mount
+    const t = setTimeout(() => setVisible(true), 10);
+    return () => clearTimeout(t);
+  }, []);
+
+  const handleClose = () => {
+    setVisible(false);
+    setTimeout(onClose, 320);
+  };
+
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 2000,
+        display: 'flex',
+        alignItems: 'flex-end',
+        backdropFilter: visible ? 'blur(4px)' : 'none',
+        background: visible ? 'rgba(0,0,0,0.45)' : 'rgba(0,0,0,0)',
+        transition: 'background 0.32s ease, backdropFilter 0.32s ease',
+      }}
+      onClick={handleClose}
+    >
+      <div
+        style={{
+          width: '100%',
+          maxHeight: '65vh',
+          background: '#FAF7F4',
+          borderRadius: '24px 24px 0 0',
+          boxShadow: '0 -8px 40px rgba(0,0,0,0.18)',
+          display: 'flex',
+          flexDirection: 'column',
+          transform: visible ? 'translateY(0)' : 'translateY(100%)',
+          transition: 'transform 0.32s cubic-bezier(0.32,0.72,0,1)',
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Drag handle */}
+        <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 12 }}>
+          <div style={{ width: 40, height: 4, borderRadius: 999, background: '#D0C8C0' }} />
+        </div>
+
+        {/* Header */}
+        <div style={{ padding: '16px 24px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ width: 14, height: 14, borderRadius: 4, background: color, flexShrink: 0 }} />
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 17, color: '#1A1A1A', lineHeight: 1.2 }}>{name}</div>
+              <div style={{ fontSize: 13, color: '#888', marginTop: 2 }}>{subProcesses.length} unique sub-processes</div>
+            </div>
+          </div>
+          <button
+            onClick={handleClose}
+            style={{
+              background: '#EBEBEB',
+              border: 'none',
+              borderRadius: '50%',
+              width: 32,
+              height: 32,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              fontSize: 16,
+              color: '#555',
+              fontWeight: 700,
+            }}
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Divider */}
+        <div style={{ height: 1, background: '#EDE8E3', margin: '0 24px' }} />
+
+        {/* Sub-process list */}
+        <div style={{ overflowY: 'auto', padding: '12px 24px 32px', flex: 1 }}>
+          {subProcesses.map((sp, idx) => (
+            <div
+              key={idx}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 14,
+                padding: '11px 0',
+                borderBottom: idx < subProcesses.length - 1 ? '1px solid #EDE8E3' : 'none',
+              }}
+            >
+              <div style={{
+                minWidth: 28,
+                height: 28,
+                borderRadius: 8,
+                background: `${color}22`,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 12,
+                fontWeight: 700,
+                color: color,
+              }}>
+                {idx + 1}
+              </div>
+              <span style={{ fontSize: 14, color: '#1A1A1A', lineHeight: 1.4 }}>{sp}</span>
+            </div>
+          ))}
         </div>
       </div>
     </div>
@@ -2384,7 +2516,7 @@ function TestingScopePage({
           <section style={{ marginTop: 16, flex: 'none' }}>
             <div style={styles.chartCard}>
               <h4 style={styles.chartTitle}>OCM Change Impact - Level 5 Tasks</h4>
-              <p style={styles.chartSubtitle}>Unique L5 count by Business Area (OCM Valid = 'Change')</p>
+              <p style={styles.chartSubtitle}>Unique L5 count by Business Area (OCM Valid = 'Change' or 'New')</p>
               <ResponsiveContainer width="100%" height={300}>
                 <BarChart data={ocmL5ChartData} margin={{ top: 15, right: 25, left: 15, bottom: 40 }} barCategoryGap="15%">
                   <CartesianGrid strokeDasharray="3 3" />
@@ -2635,6 +2767,7 @@ const styles = {
     height: '100%',
     background: 'linear-gradient(90deg, #FD5108, #FE7C39)',
     borderRadius: 999,
+    transition: 'width 0.4s ease',
   },
   summaryRow: {
     display: 'grid',

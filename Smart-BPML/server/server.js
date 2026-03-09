@@ -1248,11 +1248,11 @@ app.post('/api/fetch-fiori-apps', upload.single('file'), async (req, res) => {
 
     // Add 4 new columns at the end
     const lastColIndex = worksheet.columnCount;
-    const startCol = lastColIndex + 1; // Start after the last existing column
+    const startCol = lastColIndex + 1;
     const newColumns = ['Fiori ID', 'Fiori App Name', 'Application Type', 'App Details Link'];
     const fioriAppLibraryBaseUrl = 'https://fioriappslibrary.hana.ondemand.com/sap/fix/externalViewer/?appId=';
 
-    // Get reference cell from existing data to copy formatting (use first data column)
+    // Get reference cell from existing data to copy formatting
     const referenceHeaderCell = headerRow.getCell(1);
     const referenceDataCell = worksheet.getRow(2).getCell(1);
 
@@ -1260,19 +1260,17 @@ app.post('/api/fetch-fiori-apps', upload.single('file'), async (req, res) => {
     for (let i = 0; i < newColumns.length; i++) {
       const cell = headerRow.getCell(startCol + i);
       cell.value = newColumns[i];
-      // Copy font from reference header but ensure bold
       if (referenceHeaderCell.font) {
         cell.font = { ...referenceHeaderCell.font, bold: true };
       } else {
         cell.font = { bold: true };
       }
-      // Copy other formatting from reference header
       if (referenceHeaderCell.fill) cell.fill = referenceHeaderCell.fill;
       if (referenceHeaderCell.border) cell.border = referenceHeaderCell.border;
       if (referenceHeaderCell.alignment) cell.alignment = referenceHeaderCell.alignment;
     }
 
-    // Fill in Fiori data for each row with formatting
+    // Fill in Fiori data for each row
     for (let rowNum = 2; rowNum <= rowCount; rowNum++) {
       const row = worksheet.getRow(rowNum);
       const tcode = row.getCell(tcodeColumnIndex).value;
@@ -1287,59 +1285,40 @@ app.post('/api/fetch-fiori-apps', upload.single('file'), async (req, res) => {
 
       if (tcodeKey && tcodeToAppsMap.has(tcodeKey)) {
         const apps = tcodeToAppsMap.get(tcodeKey);
-
         if (apps.length > 0) {
           fioriIds = apps.map(app => app.fioriId || '').join(', ');
           fioriAppNames = apps.map(app => app.AppName || '').join(', ');
-          // Get unique application types only
           const uniqueAppTypes = [...new Set(apps.map(app => app.ApplicationType || '').filter(t => t))];
           applicationTypes = uniqueAppTypes.join(', ');
-          appDetailsLinks = apps.map(app => app.fioriId ? `${fioriAppLibraryBaseUrl}${app.fioriId}` : '').join(', ');
+          appDetailsLinks = apps
+            .filter(app => app.fioriId)
+            .map(app => `${fioriAppLibraryBaseUrl}${app.fioriId}`)
+            .join(', ');
         }
       }
 
-      // Get reference cell from same row to copy formatting
       const refCell = row.getCell(1);
 
-      // Set values and copy formatting for each new cell
       const fioriData = [fioriIds, fioriAppNames, applicationTypes];
       for (let i = 0; i < fioriData.length; i++) {
         const cell = row.getCell(startCol + i);
         cell.value = fioriData[i];
-        // Copy formatting from reference cell
         if (refCell.font) cell.font = refCell.font;
         if (refCell.fill) cell.fill = refCell.fill;
         if (refCell.border) cell.border = refCell.border;
         if (refCell.alignment) cell.alignment = refCell.alignment;
       }
 
-      // Handle App Details Link - show all app links
+      // App Details Link — single link as hyperlink, multiple as comma-separated plain text
       const linkCell = row.getCell(startCol + 3);
-      if (tcodeKey && tcodeToAppsMap.has(tcodeKey)) {
-        const apps = tcodeToAppsMap.get(tcodeKey);
-        if (apps.length > 0) {
-          // Create all app links
-          const allLinks = apps
-            .filter(app => app.fioriId)
-            .map(app => `${fioriAppLibraryBaseUrl}${app.fioriId}`);
-
-          if (allLinks.length === 1) {
-            // Single link - make it a clickable hyperlink
-            linkCell.value = {
-              text: allLinks[0],
-              hyperlink: allLinks[0]
-            };
-            linkCell.font = { color: { argb: 'FF0066CC' }, underline: true };
-          } else if (allLinks.length > 1) {
-            // Multiple links - show as newline-separated text (Excel limitation: only one hyperlink per cell)
-            linkCell.value = allLinks.join('\n');
-            linkCell.font = { color: { argb: 'FF0066CC' } };
-            linkCell.alignment = { ...refCell.alignment, wrapText: true };
-          } else {
-            linkCell.value = '';
-          }
+      if (appDetailsLinks) {
+        const links = appDetailsLinks.split(', ');
+        if (links.length === 1) {
+          linkCell.value = { text: links[0], hyperlink: links[0] };
+          linkCell.font = { color: { argb: 'FF0066CC' }, underline: true };
         } else {
-          linkCell.value = '';
+          linkCell.value = appDetailsLinks; // comma-separated plain text
+          linkCell.font = { color: { argb: 'FF0066CC' } };
         }
       } else {
         linkCell.value = '';
@@ -1348,7 +1327,7 @@ app.post('/api/fetch-fiori-apps', upload.single('file'), async (req, res) => {
       if (refCell.border) linkCell.border = refCell.border;
     }
 
-    console.log(`Updated ${rowCount - 1} rows with Fiori data (added at end, columns ${startCol}-${startCol + 3})`);
+    console.log(`Updated ${rowCount - 1} rows with Fiori data (columns ${startCol}-${startCol + 3})`);
 
     // Write workbook to buffer
     const buffer = await workbook.xlsx.writeBuffer();
