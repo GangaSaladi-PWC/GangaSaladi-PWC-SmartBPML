@@ -144,45 +144,53 @@ export default function App() {
 
       // Store data for Testing Scope Dashboard (L1, L4, L5) - same filter logic as bar chart
       const changeCategoryIdx = headers.findIndex(h => h && h.toString().toLowerCase().includes('change category'));
+      const eccTxIdx = headers.findIndex(h => h && h.toString().toLowerCase().includes('ecc transaction'));
+      const s4TxIdx = headers.findIndex(h => h && h.toString().toLowerCase().includes('s/4hana transaction'));
 
       if (l1Idx !== -1 && l4Idx !== -1 && l5Idx !== -1 && ocmIdx !== -1 && changeCategoryIdx !== -1) {
         const l1ColName = headers[l1Idx];
         const l4ColName = headers[l4Idx];
         const l5ColName = headers[l5Idx];
+        const eccTxColName = eccTxIdx !== -1 ? headers[eccTxIdx] : 'ECC Transaction Code';
+        const s4TxColName = s4TxIdx !== -1 ? headers[s4TxIdx] : 'S/4HANA Transaction Code';
+        const ocmColName = headers[ocmIdx];
+        const changeCatColName = headers[changeCategoryIdx];
 
         // Same filter criteria as the bar chart
         const validChangeCategories = ['SCH_R', 'SCH_N', 'TRN_N', 'TRN_C', 'FRC', 'PRC'];
 
-        // Build L1 -> Map of L5 -> L4 (for unique L5 per L1 with their L4)
-        const l1ToL5L4Map = new Map();
+        // Build L1 -> Map of L5 -> full row data (for unique L5 per L1)
+        const l1ToL5Map = new Map();
 
         rows.slice(1).forEach(row => {
           const l1 = (row[l1Idx] || '').toString().trim();
           const l4 = (row[l4Idx] || '').toString().trim();
           const l5 = (row[l5Idx] || '').toString().trim();
-          const ocmValid = (row[ocmIdx] ?? '').toString().trim().toLowerCase();
+          const ocmValid = (row[ocmIdx] ?? '').toString().trim();
           const changeCategory = (row[changeCategoryIdx] ?? '').toString().trim().toUpperCase();
+          const eccTx = eccTxIdx !== -1 ? (row[eccTxIdx] ?? '').toString().trim() : '';
+          const s4Tx = s4TxIdx !== -1 ? (row[s4TxIdx] ?? '').toString().trim() : '';
 
-          // Apply same filter as bar chart: OCM Valid = 'Change' AND valid Change Category
-          if (l1 && l5 && (ocmValid === 'change' || ocmValid === 'new') && validChangeCategories.includes(changeCategory)) {
-            if (!l1ToL5L4Map.has(l1)) {
-              l1ToL5L4Map.set(l1, new Map());
+          // Apply same filter as bar chart
+          if (l1 && l5 && (ocmValid.toLowerCase() === 'change' || ocmValid.toLowerCase() === 'new') && validChangeCategories.includes(changeCategory)) {
+            if (!l1ToL5Map.has(l1)) {
+              l1ToL5Map.set(l1, new Map());
             }
-            // Store L5 -> L4 mapping (first L4 found for each unique L5)
-            if (!l1ToL5L4Map.get(l1).has(l5)) {
-              l1ToL5L4Map.get(l1).set(l5, l4);
+            // Store L5 -> row data (first occurrence for each unique L5)
+            if (!l1ToL5Map.get(l1).has(l5)) {
+              l1ToL5Map.get(l1).set(l5, { l1, l4, l5, ocmValid, changeCategory, eccTx, s4Tx });
             }
           }
         });
 
         // Extract unique L1 values that have data
-        const uniqueL1Values = Array.from(l1ToL5L4Map.keys()).sort();
+        const uniqueL1Values = Array.from(l1ToL5Map.keys()).sort();
 
         // Convert to flat rows format for the component
         const testingRows = [];
-        l1ToL5L4Map.forEach((l5Map, l1) => {
-          l5Map.forEach((l4, l5) => {
-            testingRows.push({ l1, l4, l5 });
+        l1ToL5Map.forEach((l5Map) => {
+          l5Map.forEach((rowData) => {
+            testingRows.push(rowData);
           });
         });
 
@@ -192,6 +200,10 @@ export default function App() {
           l1ColName,
           l4ColName,
           l5ColName,
+          eccTxColName,
+          s4TxColName,
+          ocmColName,
+          changeCatColName,
           filename: file.name,
           size: file.size,
         });
@@ -347,7 +359,8 @@ export default function App() {
       if (l1Idx !== -1 && l5Idx !== -1 && ocmIdx !== -1 && changeCategoryIdx !== -1) {
         // Specific Change Category values to include
         const validChangeCategories = ['SCH_R', 'SCH_N', 'TRN_N', 'TRN_C', 'FRC', 'PRC'];
-        const l1ToL5Map = new Map();
+        const l1ToL5ChangeMap = new Map();
+        const l1ToL5NewMap = new Map();
         let matchedRows = 0;
         let ocmChangeCount = 0;
         let validCategoryCount = 0;
@@ -357,7 +370,7 @@ export default function App() {
           const l1 = cleanL1Name((row[l1Idx] || '').toString().trim());
           const l5 = (row[l5Idx] || '').toString().trim();
 
-          // Check OCM Valid = 'Change'
+          // Check OCM Valid
           const rawOcm = row[ocmIdx];
           const ocmValid = (rawOcm ?? '').toString().trim().toLowerCase();
 
@@ -370,13 +383,16 @@ export default function App() {
           if (validChangeCategories.includes(changeCategory)) validCategoryCount++;
           if (ocmValid === 'change' && validChangeCategories.includes(changeCategory)) bothConditionsCount++;
 
-          // Only include rows where OCM Valid = 'Change' AND Change Category matches one of the specified values
-          if (l1 && l5 && (ocmValid === 'change' || ocmValid === 'new') && validChangeCategories.includes(changeCategory)) {
-            matchedRows++;
-            if (!l1ToL5Map.has(l1)) {
-              l1ToL5Map.set(l1, new Set());
+          if (l1 && l5 && validChangeCategories.includes(changeCategory)) {
+            if (ocmValid === 'change') {
+              matchedRows++;
+              if (!l1ToL5ChangeMap.has(l1)) l1ToL5ChangeMap.set(l1, new Set());
+              l1ToL5ChangeMap.get(l1).add(l5);
+            } else if (ocmValid === 'new') {
+              matchedRows++;
+              if (!l1ToL5NewMap.has(l1)) l1ToL5NewMap.set(l1, new Set());
+              l1ToL5NewMap.get(l1).add(l5);
             }
-            l1ToL5Map.get(l1).add(l5);
           }
         });
 
@@ -384,15 +400,17 @@ export default function App() {
         console.log('Chart 4 - Rows with valid Change Category:', validCategoryCount);
         console.log('Chart 4 - Rows matching BOTH conditions:', bothConditionsCount);
         console.log('Chart 4 - Matched rows with L1 and L5:', matchedRows);
-        console.log('Chart 4 - L1 to L5 map size:', l1ToL5Map.size);
 
-        // Generate chart data with abbreviations (same logic as Chart 2)
+        // Collect all L1s that appear in either map
+        const allL1s = new Set([...l1ToL5ChangeMap.keys(), ...l1ToL5NewMap.keys()]);
+
+        // Generate chart data with abbreviations
         const usedAbbrs = new Map();
-        const ocmL5Data = Array.from(l1ToL5Map.entries())
-          .filter(([l1, l5Set]) => l1 && l5Set.size > 0)
-          .map(([l1, l5Set], index) => {
+        const ocmL5Data = Array.from(allL1s)
+          .sort()
+          .filter(l1 => l1)
+          .map((l1, index) => {
             let abbr = getAbbreviation(l1, index);
-            // Handle duplicate abbreviations
             if (usedAbbrs.has(abbr)) {
               const num = usedAbbrs.get(abbr) + 1;
               usedAbbrs.set(abbr, num);
@@ -403,11 +421,12 @@ export default function App() {
             return {
               fullName: l1,
               shortCode: abbr,
-              count: l5Set.size,
+              countChange: l1ToL5ChangeMap.get(l1)?.size ?? 0,
+              countNew: l1ToL5NewMap.get(l1)?.size ?? 0,
             };
           });
         setOcmL5ChartData(ocmL5Data);
-        console.log('Bar chart data (L1 vs unique L5 where OCM Valid = Change):', ocmL5Data);
+        console.log('Bar chart data (L1 vs unique L5 by OCM Valid):', ocmL5Data);
       } else {
         console.warn('Chart 4 - Cannot generate: Missing required columns', {
           hasL1: l1Idx !== -1,
@@ -1128,7 +1147,7 @@ export default function App() {
 }
 
 // Chart colors
-const CHART_COLORS = ['#FD5108', '#FF7F3E', '#FFB347', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', '#98D8C8', '#F7DC6F'];
+const CHART_COLORS = ['#FD5108', '#FF7F3E', '#FFB347', '#4ECDC4', '#45B7D1', '#96CEB4', '#A29BFE', '#DDA0DD', '#98D8C8', '#F7DC6F'];
 
 // Extract leading capital letters from name as abbreviation
 function getBusinessAbbreviation(name) {
@@ -2006,7 +2025,7 @@ function BpmlAnalysisPage({
                 {bpmlChartData.length > 0 && (
                   <div style={styles.chartCard}>
                     <h4 style={styles.chartTitle}>Unique Sub-Processes by Business Area</h4>
-                    <p style={styles.chartSubtitle}>Level 1 vs Unique Level 4 Count · <span style={{ color: '#FD5108', fontWeight: 600 }}>Tap a slice to explore</span></p>
+                    <p style={styles.chartSubtitle}>Level 1 vs Unique Level 4 Count · <span style={{ color: '#FD5108', fontWeight: 600 }}>Click On Each Slice To Get An Extended View Of Unique L4s</span></p>
                     <ResponsiveContainer width="100%" height={350}>
                       <PieChart>
                         <Pie
@@ -2319,22 +2338,27 @@ function TestingScopePage({
   const [sortDirection, setSortDirection] = useState('asc');
   const pageSize = 25;
 
-  const { uniqueL1Values = [], rows = [], l1ColName, l4ColName, l5ColName } = data || {};
+  const { uniqueL1Values = [], rows = [], l1ColName, l4ColName, l5ColName, eccTxColName, s4TxColName, ocmColName, changeCatColName } = data || {};
 
-  // Filter rows by selected L1 (data is already filtered for OCM Valid = Change and valid Change Categories)
+  // Filter rows by selected L1 (data is already filtered for OCM Valid = Change/New and valid Change Categories)
   const filteredData = useMemo(() => {
     if (!selectedL1) return [];
     return rows.filter(row => row.l1 === selectedL1);
   }, [selectedL1, rows]);
+
+  // Bar chart data: all L1s when none selected, only selected L1 when chosen
+  const chartDisplayData = useMemo(() => {
+    if (!selectedL1) return ocmL5ChartData;
+    return ocmL5ChartData.filter(d => d.fullName === selectedL1);
+  }, [selectedL1, ocmL5ChartData]);
 
   // Apply sorting
   const sortedData = useMemo(() => {
     if (sortColumn === null) return filteredData;
 
     return [...filteredData].sort((a, b) => {
-      const aVal = sortColumn === 'l1' ? a.l1 : sortColumn === 'l4' ? a.l4 : a.l5;
-      const bVal = sortColumn === 'l1' ? b.l1 : sortColumn === 'l4' ? b.l4 : b.l5;
-
+      const aVal = a[sortColumn] ?? '';
+      const bVal = b[sortColumn] ?? '';
       const comparison = aVal.localeCompare(bVal, undefined, { numeric: true, sensitivity: 'base' });
       return sortDirection === 'asc' ? comparison : -comparison;
     });
@@ -2357,16 +2381,28 @@ function TestingScopePage({
   const handleDownload = () => {
     if (sortedData.length === 0) return;
 
-    const headerRow = [l1ColName || 'Level 1', l4ColName || 'Level 4', l5ColName || 'Task (L5)'];
-    const wsData = [headerRow, ...sortedData.map(row => [row.l1, row.l4, row.l5])];
+    const headerRow = [
+      l1ColName || 'Level 1',
+      l4ColName || 'Level 4',
+      l5ColName || 'Task (L5)',
+      eccTxColName || 'ECC Transaction Code',
+      s4TxColName || 'S/4HANA Transaction Code',
+      ocmColName || 'OCM Valid',
+      changeCatColName || 'Change Category',
+    ];
+    const wsData = [
+      headerRow,
+      ...sortedData.map(row => [row.l1, row.l4, row.l5, row.eccTx, row.s4Tx, row.ocmValid, row.changeCategory]),
+    ];
     const ws = XLSX.utils.aoa_to_sheet(wsData);
 
     // Set column widths
-    ws['!cols'] = headerRow.map((h, idx) => ({
-      wch: Math.max(h.length, ...sortedData.slice(0, 100).map(row =>
-        (idx === 0 ? row.l1 : idx === 1 ? row.l4 : row.l5).length
-      )) + 2
-    }));
+    ws['!cols'] = headerRow.map((h, idx) => {
+      const vals = [l1ColName, l4ColName, l5ColName, 'eccTx', 's4Tx', 'ocmValid', 'changeCategory'];
+      const key = ['l1', 'l4', 'l5', 'eccTx', 's4Tx', 'ocmValid', 'changeCategory'][idx];
+      const maxLen = Math.max(h.length, ...sortedData.slice(0, 100).map(row => (row[key] || '').length));
+      return { wch: maxLen + 2 };
+    });
 
     // Style header row - bold only
     headerRow.forEach((_, idx) => {
@@ -2437,7 +2473,7 @@ function TestingScopePage({
 
         {/* Data Table */}
         {selectedL1 && (
-          <div style={{ ...styles.tableWrap, maxHeight: '35vh', flex: 'none' }}>
+          <div style={{ ...styles.tableWrap, maxHeight: '50vh', flex: 'none' }}>
             <table style={styles.table}>
               <thead>
                 <tr>
@@ -2445,6 +2481,10 @@ function TestingScopePage({
                     { key: 'l1', label: l1ColName || 'Level 1' },
                     { key: 'l4', label: l4ColName || 'Level 4' },
                     { key: 'l5', label: l5ColName || 'Task (L5)' },
+                    { key: 'eccTx', label: eccTxColName || 'ECC Transaction Code' },
+                    { key: 's4Tx', label: s4TxColName || 'S/4HANA Transaction Code' },
+                    { key: 'ocmValid', label: ocmColName || 'OCM Valid' },
+                    { key: 'changeCategory', label: changeCatColName || 'Change Category' },
                   ].map(({ key, label }) => (
                     <th
                       key={key}
@@ -2474,11 +2514,15 @@ function TestingScopePage({
                     <td style={styles.td}>{row.l1}</td>
                     <td style={styles.td}>{row.l4}</td>
                     <td style={styles.td}>{row.l5}</td>
+                    <td style={styles.td}>{row.eccTx}</td>
+                    <td style={styles.td}>{row.s4Tx}</td>
+                    <td style={styles.td}>{row.ocmValid}</td>
+                    <td style={styles.td}>{row.changeCategory}</td>
                   </tr>
                 ))}
                 {pageRows.length === 0 && (
                   <tr>
-                    <td style={styles.td} colSpan={3}>
+                    <td style={styles.td} colSpan={7}>
                       No tasks found for selected business area
                     </td>
                   </tr>
@@ -2512,13 +2556,15 @@ function TestingScopePage({
         )}
 
         {/* L1 vs Unique L5 Bar Chart */}
-        {ocmL5ChartData && ocmL5ChartData.length > 0 && (
+        {chartDisplayData && chartDisplayData.length > 0 && (
           <section style={{ marginTop: 16, flex: 'none' }}>
             <div style={styles.chartCard}>
               <h4 style={styles.chartTitle}>OCM Change Impact - Level 5 Tasks</h4>
-              <p style={styles.chartSubtitle}>Unique L5 count by Business Area (OCM Valid = 'Change' or 'New')</p>
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={ocmL5ChartData} margin={{ top: 15, right: 25, left: 15, bottom: 40 }} barCategoryGap="15%">
+              <p style={styles.chartSubtitle}>
+                {selectedL1 ? `${selectedL1} · Change vs New unique L5 count` : 'Unique L5 count by Business Area · broken down by OCM Valid'}
+              </p>
+              <ResponsiveContainer width="100%" height={320}>
+                <BarChart data={chartDisplayData} margin={{ top: 15, right: 25, left: 15, bottom: 40 }} barCategoryGap="15%">
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis
                     dataKey="shortCode"
@@ -2527,7 +2573,7 @@ function TestingScopePage({
                     height={40}
                     tickMargin={8}
                   />
-                  <YAxis />
+                  <YAxis allowDecimals={false} />
                   <Tooltip
                     content={({ active, payload }) => {
                       if (active && payload && payload.length) {
@@ -2535,18 +2581,21 @@ function TestingScopePage({
                         return (
                           <div style={styles.customTooltip}>
                             <div style={styles.tooltipTitle}>{d.fullName}</div>
-                            <div style={styles.tooltipValue}>{d.count} unique tasks (L5)</div>
+                            <div style={{ ...styles.tooltipValue, color: '#FD5108' }}>Change: {d.countChange} unique L5s</div>
+                            <div style={{ ...styles.tooltipValue, color: '#45B7D1' }}>New: {d.countNew} unique L5s</div>
+                            <div style={{ ...styles.tooltipValue, fontWeight: 700 }}>Total: {d.countChange + d.countNew}</div>
                           </div>
                         );
                       }
                       return null;
                     }}
                   />
-                  <Bar dataKey="count" fill="#FD5108" radius={[4, 4, 0, 0]}>
-                    {ocmL5ChartData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
-                    ))}
-                  </Bar>
+                  <Legend
+                    formatter={(value) => value === 'countChange' ? 'Change' : 'New'}
+                    wrapperStyle={{ fontSize: 12, paddingTop: 8 }}
+                  />
+                  <Bar dataKey="countChange" name="countChange" stackId="a" fill="#FD5108" maxBarSize={72} />
+                  <Bar dataKey="countNew" name="countNew" stackId="a" fill="#45B7D1" radius={[4, 4, 0, 0]} maxBarSize={72} />
                 </BarChart>
               </ResponsiveContainer>
             </div>

@@ -292,10 +292,21 @@ function mapWithKMD(extractedData) {
   const kmdHeader = kmdRows[0] || [];
   const colIdx = getKmdColumnIndices(kmdHeader);
 
+  // Deduplicate knowledge base rows in memory (temp cache only — file is NOT modified).
+  // A row is a duplicate only if ALL its column values are identical to a previously seen row.
+  const seenKmdRows = new Set();
+  const deduplicatedKmdRows = kmdRows.slice(1).filter((row) => {
+    const fingerprint = row.map(v => (v === null || v === undefined ? '' : String(v).trim())).join('\u0000');
+    if (seenKmdRows.has(fingerprint)) return false;
+    seenKmdRows.add(fingerprint);
+    return true;
+  });
+  console.log(`KMD rows: ${kmdRows.length - 1} total, ${deduplicatedKmdRows.length} after deduplication (${kmdRows.length - 1 - deduplicatedKmdRows.length} exact duplicates removed)`);
+
   // Build lookup map: simplification item -> array of { workstream, kmdDescription }
   // Store arrays to handle multiple KMD matches for same simplification item
   const kmdMap = new Map();
-  kmdRows.slice(1).forEach((row) => {
+  deduplicatedKmdRows.forEach((row) => {
     const simplificationItem = colIdx.simplificationItem >= 0
       ? (row[colIdx.simplificationItem] || '').toString().trim().toLowerCase()
       : '';
