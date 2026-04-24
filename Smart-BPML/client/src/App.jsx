@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState, useEffect } from 'react';
 import pwcLogo from './assets/pwc-logo.png';
 import * as XLSX from 'xlsx-js-style';
-import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
+import { PieChart, Pie, Cell, Sector, Tooltip, Legend, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
 
 function formatBytes(bytes) {
   if (!bytes) return '0 B';
@@ -14,7 +14,7 @@ function formatBytes(bytes) {
 export default function App() {
   const API_BASE = import.meta.env.VITE_API_BASE ?? '';
   const [cards, setCards] = useState([
-    { title: 'Generated BPML File', subtitle: 'Supported: Excel (xlsx / xlsm)', fileType: 'xlsx', file: null },
+    { title: 'BPML File', subtitle: 'Supported: Excel (xlsx / xlsm)', fileType: 'xlsx', file: null },
     { title: 'Readiness Check File', subtitle: 'Supported: Word (.docx)', fileType: 'docx', file: null },
   ]);
   const [activeCard, setActiveCard] = useState(0);
@@ -650,7 +650,7 @@ export default function App() {
     }
   };
 
-  const handleDownload = async (cardIdx) => {
+  const handleDownload = async (cardIdx, workstream = null) => {
     const targetFile = cards[cardIdx]?.file;
     if (!targetFile) return;
     setMergingIdx(cardIdx);
@@ -662,7 +662,13 @@ export default function App() {
       // Determine which endpoint to use based on file type
       const isDocx = targetFile.name.toLowerCase().endsWith('.docx');
       const endpoint = isDocx ? '/api/download-docx' : '/api/merge-download';
-      const filename = isDocx ? 'KMD Disposition - Readiness Check.xlsx' : 'KMD Disposition - BPML.xlsx';
+      const wsLabel = isDocx && workstream ? ` - ${workstream}` : '';
+      const filename = isDocx ? `KMD Disposition - Readiness Check${wsLabel}.xlsx` : 'KMD Disposition - BPML.xlsx';
+
+      // Pass workstream filter to server when selected
+      if (isDocx && workstream) {
+        data.append('workstream', workstream);
+      }
 
       const res = await fetch(`${API_BASE}${endpoint}`, {
         method: 'POST',
@@ -1112,7 +1118,7 @@ export default function App() {
         <PreviewPage
           output={previewIdx === 'fiori' ? fioriOutput : outputs.find((o) => o.cardIdx === previewIdx)}
           onClose={() => setView('main')}
-          onDownload={previewIdx === 'fiori' ? handleFioriDownload : () => handleDownload(previewIdx)}
+          onDownload={previewIdx === 'fiori' ? handleFioriDownload : (workstream) => handleDownload(previewIdx, workstream)}
           downloading={previewIdx === 'fiori' ? false : mergingIdx === previewIdx}
           page={page}
           setPage={setPage}
@@ -1243,29 +1249,118 @@ function PreviewPage({
   title = 'Merged Output',
 }) {
   const [activeSheetIdx, setActiveSheetIdx] = useState(0);
+  const [selectedWorkstream, setSelectedWorkstream] = useState('');
 
-  // Check if this is multi-sheet output
   const isMultiSheet = output?.multiSheet && output?.sheets;
 
-  // Get header and rows based on whether it's multi-sheet or single-sheet
-  // For multi-sheet, each sheet can have its own header
+  // Extract unique workstreams from All Items sheet (col 4 = Workstream)
+  const workstreamOptions = useMemo(() => {
+    if (!isMultiSheet) return [];
+    const allItemsRows = output.sheets[0]?.rows || [];
+    const ws = new Set();
+    allItemsRows.forEach(row => {
+      const w = (row[4] || '').toString().trim();
+      if (w) ws.add(w);
+    });
+    return Array.from(ws).sort();
+  }, [isMultiSheet, output]);
+
+  // Per-sheet filtered data when a workstream is selected
+  const filteredSheets = useMemo(() => {
+    if (!isMultiSheet || !selectedWorkstream) return output.sheets;
+    return output.sheets.map(sheet => {
+      if (sheet.name === 'All Items' || sheet.name === 'Simplification Items') {
+        return { ...sheet, rows: sheet.rows.filter(row => (row[4] || '').toString().trim() === selectedWorkstream) };
+      }
+      if (sheet.name === 'KMD Dispositions') {
+        return { ...sheet, rows: sheet.rows.filter(row => (row[0] || '').toString().trim() === selectedWorkstream) };
+      }
+      if (sheet.name === 'Summary') {
+        // Keep only the matching workstream row (skip Total row)
+        return { ...sheet, rows: sheet.rows.filter(row => (row[0] || '').toString().trim() === selectedWorkstream) };
+      }
+      return sheet;
+    });
+  }, [isMultiSheet, selectedWorkstream, output]);
+
+  const activeSheets = isMultiSheet ? filteredSheets : null;
+
+  // Build bar chart data for Summary tab when workstream is selected
+  const summaryBarData = useMemo(() => {
+    if (!isMultiSheet || !selectedWorkstream || activeSheetIdx !== 2) return null;
+    const summarySheet = activeSheets[2];
+    const summaryHeader = summarySheet?.header || [];
+    const dataRow = summarySheet?.rows[0];
+    if (!dataRow) return null;
+    const result = [];
+    for (let i = 1; i < summaryHeader.length; i++) {
+      const cat = summaryHeader[i];
+      if (cat && cat !== 'Total') {
+        const count = Number(dataRow[i]) || 0;
+        if (count > 0) result.push({ category: cat, count });
+      }
+    }
+    return result;
+  }, [isMultiSheet, selectedWorkstream, activeSheetIdx, activeSheets]);
+
   const header = isMultiSheet
-    ? (output.sheets[activeSheetIdx]?.header || [])
+    ? (activeSheets[activeSheetIdx]?.header || [])
     : (output?.header || []);
 
   const rows = isMultiSheet
-    ? (output.sheets[activeSheetIdx]?.rows || [])
+    ? (activeSheets[activeSheetIdx]?.rows || [])
     : (output?.rows || []);
+
+  const isSummaryWithWorkstream = isMultiSheet && selectedWorkstream && activeSheetIdx === 2;
 
   const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
   const start = (page - 1) * pageSize;
   const pageRows = rows.slice(start, start + pageSize);
-  const rowCount = rows.length;
-  const colCount = header.length;
+
+  const renderTableBody = (bodyRows) => bodyRows.map((row, idx) => {
+    const isFioriOutput = title === 'Fiori Mapping Output';
+    const fioriIdStr = isFioriOutput ? (row[1] || '').toString().trim() : '';
+    const fioriIds = fioriIdStr.split(/[\n,]/).map(s => s.trim()).filter(s => s);
+    return (
+      <tr key={idx}>
+        {row.map((cell, cIdx) => {
+          const cellStr = (cell || '').toString();
+          const urls = cellStr.split(/[\n,]/).map(s => s.trim()).filter(s =>
+            s.startsWith('http://') || s.startsWith('https://')
+          );
+          const getSapNoteLabel = (url) => {
+            const m = url.match(/\/notes\/(\d+)/i);
+            return m ? `SAP Note ${m[1]}` : null;
+          };
+          const getLinkLabel = (url, linkIdx) => {
+            const sap = getSapNoteLabel(url);
+            if (sap) return sap;
+            if (isFioriOutput && fioriIds.length > 0) return fioriIds[linkIdx] || fioriIds[0] || `App ${linkIdx + 1}`;
+            return `Open KMD${urls.length > 1 ? ` ${linkIdx + 1}` : ''}`;
+          };
+          return (
+            <td key={cIdx} style={styles.td}>
+              {urls.length > 0 ? (
+                <div style={styles.linkContainer}>
+                  {urls.map((url, linkIdx) => (
+                    <a key={linkIdx} href={url} target="_blank" rel="noopener noreferrer" style={styles.tableLink}>
+                      {getLinkLabel(url, linkIdx)}
+                    </a>
+                  ))}
+                </div>
+              ) : cell}
+            </td>
+          );
+        })}
+      </tr>
+    );
+  });
 
   return (
     <div style={styles.previewOverlay}>
       <div style={styles.previewCard}>
+
+        {/* Header */}
         <div style={styles.previewHeader}>
           <div>
             <div style={styles.sectionTitle}>{title}</div>
@@ -1273,34 +1368,61 @@ function PreviewPage({
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button
-              style={{
-                ...styles.actionButton,
-                ...(downloading ? styles.disabledButton : {}),
-              }}
-              onClick={onDownload}
+              style={{ ...styles.actionButton, ...(downloading ? styles.disabledButton : {}) }}
+              onClick={() => onDownload(selectedWorkstream || null)}
               disabled={downloading}
             >
-              {downloading ? 'Downloading…' : 'Download Excel'}
+              {downloading ? 'Downloading…' : selectedWorkstream ? `Download (${selectedWorkstream})` : 'Download Excel'}
             </button>
-            <button style={styles.closeButton} onClick={onClose} aria-label="Close">
-              ✕
-            </button>
+            <button style={styles.closeButton} onClick={onClose} aria-label="Close">✕</button>
           </div>
         </div>
 
+        {/* Workstream filter — only for Readiness Check multi-sheet output */}
+        {isMultiSheet && workstreamOptions.length > 0 && (
+          <div style={{
+            padding: '10px 20px',
+            borderBottom: '1px solid #EDE8E3',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            background: '#FAFAFA',
+          }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: '#555', flexShrink: 0 }}>
+              Filter by Workstream:
+            </span>
+            <div style={{ width: 300 }}>
+              <SearchableDropdown
+                value={selectedWorkstream}
+                options={workstreamOptions}
+                onChange={(val) => { setSelectedWorkstream(val); setPage(1); setActiveSheetIdx(0); }}
+                placeholder="All workstreams (no filter)"
+              />
+            </div>
+            {selectedWorkstream && (
+              <button
+                onClick={() => { setSelectedWorkstream(''); setPage(1); }}
+                style={{ fontSize: 12, color: '#FD5108', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600, padding: '2px 6px' }}
+              >
+                Clear ✕
+              </button>
+            )}
+            {selectedWorkstream && (
+              <span style={{ fontSize: 12, color: '#888', marginLeft: 4 }}>
+                Showing data for <strong>{selectedWorkstream}</strong> across all tabs
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Sheet tabs */}
         {isMultiSheet && (
           <div style={styles.sheetTabs}>
-            {output.sheets.map((sheet, idx) => (
+            {activeSheets.map((sheet, idx) => (
               <button
                 key={idx}
-                style={{
-                  ...styles.sheetTab,
-                  ...(activeSheetIdx === idx ? styles.sheetTabActive : {}),
-                }}
-                onClick={() => {
-                  setActiveSheetIdx(idx);
-                  setPage(1);
-                }}
+                style={{ ...styles.sheetTab, ...(activeSheetIdx === idx ? styles.sheetTabActive : {}) }}
+                onClick={() => { setActiveSheetIdx(idx); setPage(1); }}
               >
                 {sheet.name} ({sheet.rows.length})
               </button>
@@ -1308,110 +1430,85 @@ function PreviewPage({
           </div>
         )}
 
-        <div style={styles.tableWrap}>
-          <table style={styles.table}>
-            <thead>
-              <tr>
-                {header.map((h, idx) => (
-                  <th key={idx} style={styles.th}>
-                    {h || '-'}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {pageRows.map((row, idx) => {
-                // Check if this is Fiori output - get Fiori IDs from column index 1
-                const isFioriOutput = title === 'Fiori Mapping Output';
-                const fioriIdStr = isFioriOutput ? (row[1] || '').toString().trim() : '';
-                // Split Fiori IDs in case there are multiple (comma or newline separated)
-                const fioriIds = fioriIdStr.split(/[\n,]/).map(s => s.trim()).filter(s => s);
-
-                return (
-                  <tr key={idx}>
-                    {row.map((cell, cIdx) => {
-                      const cellStr = (cell || '').toString();
-                      // Check if cell contains URLs (could be multiple, newline or comma separated)
-                      const urls = cellStr.split(/[\n,]/).map(s => s.trim()).filter(s =>
-                        s.startsWith('http://') || s.startsWith('https://')
-                      );
-
-                      // Helper to extract SAP Note number from URL
-                      const getSapNoteLabel = (url) => {
-                        // Match SAP Note URLs like launchpad.support.sap.com/#/notes/123456 or me.sap.com/notes/123456
-                        const sapNoteMatch = url.match(/\/notes\/(\d+)/i);
-                        if (sapNoteMatch) {
-                          return `SAP Note ${sapNoteMatch[1]}`;
-                        }
-                        return null;
-                      };
-
-                      // Get link label based on context
-                      const getLinkLabel = (url, linkIdx) => {
-                        const sapNoteLabel = getSapNoteLabel(url);
-                        if (sapNoteLabel) return sapNoteLabel;
-                        // For Fiori output, use corresponding Fiori ID by index
-                        if (isFioriOutput && fioriIds.length > 0) {
-                          return fioriIds[linkIdx] || fioriIds[0] || `App ${linkIdx + 1}`;
-                        }
-                        return `Open KMD${urls.length > 1 ? ` ${linkIdx + 1}` : ''}`;
-                      };
-
-                      return (
-                        <td key={cIdx} style={styles.td}>
-                          {urls.length > 0 ? (
-                            <div style={styles.linkContainer}>
-                              {urls.map((url, linkIdx) => (
-                                <a
-                                  key={linkIdx}
-                                  href={url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  style={styles.tableLink}
-                                >
-                                  {getLinkLabel(url, linkIdx)}
-                                </a>
-                              ))}
-                            </div>
-                          ) : (
-                            cell
-                          )}
-                        </td>
-                      );
-                    })}
+        {/* Summary tab with workstream selected: bar chart + single row table */}
+        {isSummaryWithWorkstream ? (
+          <div style={{ padding: '20px 24px', overflowY: 'auto', flex: 1 }}>
+            <div style={{ fontWeight: 600, fontSize: 15, color: '#1A1A1A', marginBottom: 4 }}>
+              Category Distribution — {selectedWorkstream}
+            </div>
+            <div style={{ fontSize: 12, color: '#888', marginBottom: 20 }}>
+              Effort ranking breakdown for this workstream
+            </div>
+            {summaryBarData && summaryBarData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={280}>
+                <BarChart data={summaryBarData} margin={{ top: 10, right: 30, left: 10, bottom: 50 }}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis
+                    dataKey="category"
+                    interval={0}
+                    tick={{ fontSize: 11 }}
+                    angle={-30}
+                    textAnchor="end"
+                    height={60}
+                  />
+                  <YAxis allowDecimals={false} />
+                  <Tooltip formatter={(value) => [value, 'Count']} />
+                  <Bar dataKey="count" radius={[4, 4, 0, 0]}>
+                    {summaryBarData.map((entry, index) => (
+                      <Cell key={index} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div style={{ color: '#888', fontSize: 13 }}>No category data for this workstream.</div>
+            )}
+            {/* Pivot row as table below the chart */}
+            {rows.length > 0 && (
+              <div style={{ marginTop: 24 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: '#555', marginBottom: 8 }}>Pivot Detail</div>
+                <div style={styles.tableWrap}>
+                  <table style={styles.table}>
+                    <thead>
+                      <tr>{header.map((h, i) => <th key={i} style={styles.th}>{h || '-'}</th>)}</tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((row, i) => (
+                        <tr key={i}>{row.map((cell, ci) => <td key={ci} style={styles.td}>{cell}</td>)}</tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <>
+            <div style={styles.tableWrap}>
+              <table style={styles.table}>
+                <thead>
+                  <tr>
+                    {header.map((h, idx) => <th key={idx} style={styles.th}>{h || '-'}</th>)}
                   </tr>
-                );
-              })}
-              {pageRows.length === 0 && (
-                <tr>
-                  <td style={styles.td} colSpan={header.length || 1}>
-                    No data
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+                </thead>
+                <tbody>
+                  {renderTableBody(pageRows)}
+                  {pageRows.length === 0 && (
+                    <tr>
+                      <td style={styles.td} colSpan={header.length || 1}>No data</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <div style={styles.pagination}>
+              <button style={styles.secondaryButton} onClick={() => setPage(Math.max(1, page - 1))} disabled={page === 1}>Prev</button>
+              <span style={{ fontWeight: 700 }}>Page {page} of {totalPages}</span>
+              <button style={styles.secondaryButton} onClick={() => setPage(Math.min(totalPages, page + 1))} disabled={page === totalPages}>Next</button>
+            </div>
+          </>
+        )}
 
-        <div style={styles.pagination}>
-          <button
-            style={styles.secondaryButton}
-            onClick={() => setPage(Math.max(1, page - 1))}
-            disabled={page === 1}
-          >
-            Prev
-          </button>
-          <span style={{ fontWeight: 700 }}>
-            Page {page} of {totalPages}
-          </span>
-          <button
-            style={styles.secondaryButton}
-            onClick={() => setPage(Math.min(totalPages, page + 1))}
-            disabled={page === totalPages}
-          >
-            Next
-          </button>
-        </div>
       </div>
     </div>
   );
@@ -2045,6 +2142,7 @@ function BpmlAnalysisPage({
                               name: entry.name,
                               subProcesses: entry.subProcesses || [],
                               color: CHART_COLORS[index % CHART_COLORS.length],
+                              selectedIndex: index,
                             });
                           }}
                           style={{ cursor: 'pointer' }}
@@ -2198,12 +2296,14 @@ function BpmlAnalysisPage({
         </div>
       </div>
 
-      {/* iOS-style drill-down bottom sheet */}
+      {/* Drill-down full screen */}
       {drilldown && (
-        <DrillDownSheet
+        <DrillDownFullScreen
           name={drilldown.name}
           subProcesses={drilldown.subProcesses}
           color={drilldown.color}
+          selectedIndex={drilldown.selectedIndex}
+          bpmlChartData={bpmlChartData}
           onClose={() => setDrilldown(null)}
         />
       )}
@@ -2211,116 +2311,268 @@ function BpmlAnalysisPage({
   );
 }
 
-function DrillDownSheet({ name, subProcesses, color, onClose }) {
-  const [visible, setVisible] = useState(false);
+function DrillDownFullScreen({ name, subProcesses, color, selectedIndex, bpmlChartData, onClose }) {
+  const [page, setPage] = useState(1);
+  const pageSize = 20;
 
-  useEffect(() => {
-    // Trigger slide-up animation after mount
-    const t = setTimeout(() => setVisible(true), 10);
-    return () => clearTimeout(t);
-  }, []);
+  const totalPages = Math.max(1, Math.ceil(subProcesses.length / pageSize));
+  const start = (page - 1) * pageSize;
+  const pageRows = subProcesses.slice(start, start + pageSize);
 
-  const handleClose = () => {
-    setVisible(false);
-    setTimeout(onClose, 320);
+  const renderActiveShape = (props) => {
+    const { cx, cy, innerRadius, outerRadius, startAngle, endAngle, fill } = props;
+    return (
+      <g>
+        <Sector
+          cx={cx}
+          cy={cy}
+          innerRadius={innerRadius}
+          outerRadius={outerRadius + 12}
+          startAngle={startAngle}
+          endAngle={endAngle}
+          fill={fill}
+          stroke="#fff"
+          strokeWidth={2}
+        />
+      </g>
+    );
   };
 
   return (
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 2000,
+    <div style={{
+      position: 'fixed',
+      inset: 0,
+      zIndex: 2000,
+      background: '#FAF7F4',
+      display: 'flex',
+      flexDirection: 'column',
+      overflow: 'hidden',
+    }}>
+      {/* Header */}
+      <div style={{
+        padding: '14px 28px',
         display: 'flex',
-        alignItems: 'flex-end',
-        backdropFilter: visible ? 'blur(4px)' : 'none',
-        background: visible ? 'rgba(0,0,0,0.45)' : 'rgba(0,0,0,0)',
-        transition: 'background 0.32s ease, backdropFilter 0.32s ease',
-      }}
-      onClick={handleClose}
-    >
-      <div
-        style={{
-          width: '100%',
-          maxHeight: '65vh',
-          background: '#FAF7F4',
-          borderRadius: '24px 24px 0 0',
-          boxShadow: '0 -8px 40px rgba(0,0,0,0.18)',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        borderBottom: '1px solid #EDE8E3',
+        background: '#fff',
+        flexShrink: 0,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ width: 14, height: 14, borderRadius: 4, background: color, flexShrink: 0 }} />
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 18, color: '#1A1A1A', lineHeight: 1.2 }}>{name}</div>
+            <div style={{ fontSize: 13, color: '#888', marginTop: 2 }}>{subProcesses.length} unique sub-processes</div>
+          </div>
+        </div>
+        <button
+          onClick={onClose}
+          style={{
+            background: '#EBEBEB',
+            border: 'none',
+            borderRadius: '50%',
+            width: 36,
+            height: 36,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            fontSize: 18,
+            color: '#555',
+            fontWeight: 700,
+            flexShrink: 0,
+          }}
+        >
+          ✕
+        </button>
+      </div>
+
+      {/* Body */}
+      <div style={{
+        flex: 1,
+        display: 'flex',
+        overflow: 'hidden',
+        gap: 0,
+      }}>
+        {/* Left panel: Pie chart */}
+        <div style={{
+          width: 380,
+          flexShrink: 0,
+          borderRight: '1px solid #EDE8E3',
+          background: '#fff',
           display: 'flex',
           flexDirection: 'column',
-          transform: visible ? 'translateY(0)' : 'translateY(100%)',
-          transition: 'transform 0.32s cubic-bezier(0.32,0.72,0,1)',
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Drag handle */}
-        <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 12 }}>
-          <div style={{ width: 40, height: 4, borderRadius: 999, background: '#D0C8C0' }} />
+          padding: '24px 16px',
+          overflowY: 'auto',
+        }}>
+          <div style={{ fontWeight: 600, fontSize: 14, color: '#555', marginBottom: 8, textAlign: 'center' }}>
+            Unique Sub-Processes by Business Area
+          </div>
+          <ResponsiveContainer width="100%" height={300}>
+            <PieChart>
+              <Pie
+                data={bpmlChartData}
+                activeIndex={selectedIndex}
+                activeShape={renderActiveShape}
+                cx="50%"
+                cy="50%"
+                outerRadius={110}
+                dataKey="value"
+                label={({ name: n, value }) => `${getBusinessAbbreviation(n)}: ${value}`}
+                labelLine={true}
+              >
+                {bpmlChartData.map((entry, index) => (
+                  <Cell
+                    key={`cell-${index}`}
+                    fill={CHART_COLORS[index % CHART_COLORS.length]}
+                    opacity={index === selectedIndex ? 1 : 0.35}
+                  />
+                ))}
+              </Pie>
+              <Tooltip formatter={(value, n) => [`${value} unique sub-processes`, n]} />
+            </PieChart>
+          </ResponsiveContainer>
+
+          {/* Legend */}
+          <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {bpmlChartData.map((entry, index) => (
+              <div
+                key={index}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  opacity: index === selectedIndex ? 1 : 0.45,
+                  fontWeight: index === selectedIndex ? 700 : 400,
+                }}
+              >
+                <span style={{
+                  width: 12,
+                  height: 12,
+                  borderRadius: 3,
+                  background: CHART_COLORS[index % CHART_COLORS.length],
+                  flexShrink: 0,
+                  display: 'inline-block',
+                }} />
+                <span style={{ fontSize: 12, color: '#444' }}>
+                  <span style={{ fontWeight: 700 }}>{getBusinessAbbreviation(entry.name)}</span>
+                  {' '}– {entry.name}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
 
-        {/* Header */}
-        <div style={{ padding: '16px 24px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div style={{ width: 14, height: 14, borderRadius: 4, background: color, flexShrink: 0 }} />
-            <div>
-              <div style={{ fontWeight: 700, fontSize: 17, color: '#1A1A1A', lineHeight: 1.2 }}>{name}</div>
-              <div style={{ fontSize: 13, color: '#888', marginTop: 2 }}>{subProcesses.length} unique sub-processes</div>
-            </div>
+        {/* Right panel: Table */}
+        <div style={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+          padding: '24px 28px',
+        }}>
+          <div style={{ fontWeight: 600, fontSize: 15, color: '#1A1A1A', marginBottom: 14 }}>
+            Sub-Processes (Level 4) — {subProcesses.length} total
           </div>
-          <button
-            onClick={handleClose}
-            style={{
-              background: '#EBEBEB',
-              border: 'none',
-              borderRadius: '50%',
-              width: 32,
-              height: 32,
+
+          {/* Table */}
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+              <thead>
+                <tr style={{ background: '#F5F3F0', position: 'sticky', top: 0, zIndex: 1 }}>
+                  <th style={{
+                    padding: '10px 14px',
+                    textAlign: 'left',
+                    fontWeight: 700,
+                    color: '#555',
+                    borderBottom: '2px solid #EDE8E3',
+                    width: 60,
+                  }}>#</th>
+                  <th style={{
+                    padding: '10px 14px',
+                    textAlign: 'left',
+                    fontWeight: 700,
+                    color: '#555',
+                    borderBottom: '2px solid #EDE8E3',
+                  }}>Sub-Process Name (Level 4)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pageRows.map((sp, idx) => {
+                  const rowNum = start + idx + 1;
+                  return (
+                    <tr
+                      key={idx}
+                      style={{
+                        background: idx % 2 === 0 ? '#fff' : '#FAF7F4',
+                        transition: 'background 0.15s',
+                      }}
+                    >
+                      <td style={{
+                        padding: '10px 14px',
+                        color: color,
+                        fontWeight: 700,
+                        fontSize: 13,
+                        borderBottom: '1px solid #EDE8E3',
+                        verticalAlign: 'middle',
+                      }}>{rowNum}</td>
+                      <td style={{
+                        padding: '10px 14px',
+                        color: '#1A1A1A',
+                        borderBottom: '1px solid #EDE8E3',
+                        lineHeight: 1.5,
+                        verticalAlign: 'middle',
+                      }}>{sp}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div style={{
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              cursor: 'pointer',
-              fontSize: 16,
-              color: '#555',
-              fontWeight: 700,
-            }}
-          >
-            ✕
-          </button>
-        </div>
-
-        {/* Divider */}
-        <div style={{ height: 1, background: '#EDE8E3', margin: '0 24px' }} />
-
-        {/* Sub-process list */}
-        <div style={{ overflowY: 'auto', padding: '12px 24px 32px', flex: 1 }}>
-          {subProcesses.map((sp, idx) => (
-            <div
-              key={idx}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 14,
-                padding: '11px 0',
-                borderBottom: idx < subProcesses.length - 1 ? '1px solid #EDE8E3' : 'none',
-              }}
-            >
-              <div style={{
-                minWidth: 28,
-                height: 28,
-                borderRadius: 8,
-                background: `${color}22`,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: 12,
-                fontWeight: 700,
-                color: color,
-              }}>
-                {idx + 1}
-              </div>
-              <span style={{ fontSize: 14, color: '#1A1A1A', lineHeight: 1.4 }}>{sp}</span>
+              gap: 12,
+              paddingTop: 16,
+              borderTop: '1px solid #EDE8E3',
+              marginTop: 8,
+              flexShrink: 0,
+            }}>
+              <button
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+                disabled={page === 1}
+                style={{
+                  padding: '6px 14px',
+                  borderRadius: 6,
+                  border: '1px solid #DDD',
+                  background: page === 1 ? '#F5F3F0' : '#fff',
+                  cursor: page === 1 ? 'default' : 'pointer',
+                  color: page === 1 ? '#AAA' : '#333',
+                  fontSize: 13,
+                }}
+              >← Prev</button>
+              <span style={{ fontSize: 13, color: '#555' }}>
+                Page {page} of {totalPages}
+              </span>
+              <button
+                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                disabled={page === totalPages}
+                style={{
+                  padding: '6px 14px',
+                  borderRadius: 6,
+                  border: '1px solid #DDD',
+                  background: page === totalPages ? '#F5F3F0' : '#fff',
+                  cursor: page === totalPages ? 'default' : 'pointer',
+                  color: page === totalPages ? '#AAA' : '#333',
+                  fontSize: 13,
+                }}
+              >Next →</button>
             </div>
-          ))}
+          )}
         </div>
       </div>
     </div>

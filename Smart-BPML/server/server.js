@@ -1015,11 +1015,25 @@ app.post('/api/download-docx', upload.single('file'), async (req, res) => {
 
   try {
     console.log('Starting download-docx processing...');
+    const workstreamFilter = (req.body.workstream || '').toString().trim();
+    if (workstreamFilter) {
+      console.log(`Workstream filter applied: "${workstreamFilter}"`);
+    }
+
     const extractedData = extractTablesFromDocx(req.file.buffer);
     const allItems = mapWithKMD(extractedData);
     const simplificationItems = filterSimplificationItems(allItems);
-    const pivotData = createPivotTable(simplificationItems);
-    const kmdDispositions = createKMDDispositions(simplificationItems);
+
+    // Apply workstream filter if provided
+    const filteredAllItems = workstreamFilter
+      ? allItems.filter(item => (item.workstream || '').trim() === workstreamFilter)
+      : allItems;
+    const filteredSimplificationItems = workstreamFilter
+      ? simplificationItems.filter(item => (item.workstream || '').trim() === workstreamFilter)
+      : simplificationItems;
+
+    const pivotData = createPivotTable(filteredSimplificationItems);
+    const kmdDispositions = createKMDDispositions(filteredSimplificationItems);
 
     // Use ExcelJS for better formatting
     console.log('Creating workbook with ExcelJS...');
@@ -1048,7 +1062,7 @@ app.post('/api/download-docx', upload.single('file'), async (req, res) => {
       { header: 'Workstream', key: 'workstream', width: 20 },
       { header: 'KMD Description', key: 'kmdDescription', width: 30 },
     ];
-    ws1.addRows(allItems);
+    ws1.addRows(filteredAllItems);
     ws1.getRow(1).font = { bold: true };
     makeSapNoteHyperlinks(ws1, 4); // SAP Note is column 4
 
@@ -1062,7 +1076,7 @@ app.post('/api/download-docx', upload.single('file'), async (req, res) => {
       { header: 'Workstream', key: 'workstream', width: 20 },
       { header: 'KMD Description', key: 'kmdDescription', width: 30 },
     ];
-    ws2.addRows(simplificationItems);
+    ws2.addRows(filteredSimplificationItems);
     ws2.getRow(1).font = { bold: true };
     makeSapNoteHyperlinks(ws2, 4); // SAP Note is column 4
 
