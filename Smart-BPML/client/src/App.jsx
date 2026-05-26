@@ -508,7 +508,7 @@ export default function App() {
         done: false,
       };
       const next = { ...existing, ...patch };
-      const others = prev.filter((o) => o.cardIdx !== cardIdx);
+const others = prev.filter((o) => o.cardIdx !== cardIdx);
       return [...others, next].sort((a, b) => a.cardIdx - b.cardIdx);
     });
   };
@@ -884,6 +884,7 @@ export default function App() {
         />
       </div>
 
+   
       <section style={styles.card}>
         <div style={styles.sectionHeader}>
           <h3 style={styles.sectionTitle}>Input Files (2)</h3>
@@ -1148,6 +1149,7 @@ export default function App() {
           ocmL5ChartData={ocmL5ChartData}
         />
       )}
+
     </div>
   );
 }
@@ -1501,7 +1503,7 @@ function PreviewPage({
                 </tbody>
               </table>
             </div>
-            <div style={styles.pagination}>
+            <div style={{ ...styles.pagination, paddingRight: 80 }}>
               <button style={styles.secondaryButton} onClick={() => setPage(Math.max(1, page - 1))} disabled={page === 1}>Prev</button>
               <span style={{ fontWeight: 700 }}>Page {page} of {totalPages}</span>
               <button style={styles.secondaryButton} onClick={() => setPage(Math.min(totalPages, page + 1))} disabled={page === totalPages}>Next</button>
@@ -1510,6 +1512,7 @@ function PreviewPage({
         )}
 
       </div>
+      <img src={pwcLogo} alt="PwC" style={{ position: 'fixed', bottom: 16, right: 20, height: 28, opacity: 0.85, zIndex: 9999, pointerEvents: 'none' }} />
     </div>
   );
 }
@@ -2307,6 +2310,7 @@ function BpmlAnalysisPage({
           onClose={() => setDrilldown(null)}
         />
       )}
+      <img src={pwcLogo} alt="PwC" style={{ position: 'fixed', bottom: 16, right: 20, height: 28, opacity: 0.85, zIndex: 9999, pointerEvents: 'none' }} />
     </div>
   );
 }
@@ -2575,6 +2579,7 @@ function DrillDownFullScreen({ name, subProcesses, color, selectedIndex, bpmlCha
           )}
         </div>
       </div>
+      <img src={pwcLogo} alt="PwC" style={{ position: 'fixed', bottom: 16, right: 20, height: 28, opacity: 0.85, zIndex: 9999, pointerEvents: 'none' }} />
     </div>
   );
 }
@@ -2854,6 +2859,7 @@ function TestingScopePage({
           </section>
         )}
       </div>
+      <img src={pwcLogo} alt="PwC" style={{ position: 'fixed', bottom: 16, right: 20, height: 28, opacity: 0.85, zIndex: 9999, pointerEvents: 'none' }} />
     </div>
   );
 }

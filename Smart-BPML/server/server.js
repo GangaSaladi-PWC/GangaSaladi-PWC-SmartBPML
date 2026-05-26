@@ -321,7 +321,11 @@ function mapWithKMD(extractedData) {
       if (!kmdMap.has(simplificationItem)) {
         kmdMap.set(simplificationItem, []);
       }
-      kmdMap.get(simplificationItem).push({ workstream, kmdDescription });
+      const entries = kmdMap.get(simplificationItem);
+      const alreadyExists = entries.some(e => e.workstream === workstream && e.kmdDescription === kmdDescription);
+      if (!alreadyExists) {
+        entries.push({ workstream, kmdDescription });
+      }
     }
   });
 
